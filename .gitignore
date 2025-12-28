@@ -1,0 +1,28 @@
+# Claude development files
+.claude/
+
+# Build artifacts
+.build/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# Package Manager
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Release artifacts (built separately)
+releases/
+*.zip
+*.tar.gz
