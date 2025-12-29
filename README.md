@@ -49,18 +49,23 @@ This method automatically signs the app with your personal development certifica
 git clone https://github.com/damienheiser/pickle-cider
 cd pickle-cider
 
-# Generate Xcode project
-swift package generate-xcodeproj
-
-# Open in Xcode
-open PickleCider.xcodeproj
+# Open Package.swift in Xcode
+open Package.swift
 ```
 
 In Xcode:
-1. Select **PickleCider** scheme
-2. Set signing team to your Personal Team
-3. Build and Run (⌘R)
-4. Find the app in Products folder, drag to Applications
+1. Wait for package dependencies to resolve
+2. Select **PickleCider** scheme (top left dropdown)
+3. Select **My Mac** as destination
+4. Product → Build (⌘B)
+5. Product → Show Build Folder in Finder
+6. Navigate to Products/Release/ and drag **PickleCider.app** to Applications
+
+For CLI tools, also run:
+```bash
+swift build -c release
+sudo cp .build/release/cider .build/release/pickle /usr/local/bin/
+```
 
 ### Option 2: Build with Swift + Manual Signing
 
