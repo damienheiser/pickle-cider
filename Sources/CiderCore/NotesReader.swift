@@ -193,6 +193,70 @@ public final class NotesReader: Sendable {
             return try Int.fetchOne(db, sql: sql) ?? 0
         }
     }
+
+    // MARK: - Attachments
+
+    /// Fetch all attachments for a note
+    public func getAttachments(noteID: Int64) throws -> [NoteAttachment] {
+        try dbQueue.read { db in
+            let sql = """
+                SELECT
+                    a.Z_PK as id,
+                    a.ZIDENTIFIER as uuid,
+                    a.ZNOTE as noteID,
+                    a.ZTYPEUTI as typeUTI,
+                    m.ZIDENTIFIER as mediaUUID,
+                    m.ZFILENAME as filename,
+                    m.ZFILESIZE as fileSize,
+                    a.ZSUMMARY as summary
+                FROM ZICCLOUDSYNCINGOBJECT a
+                LEFT JOIN ZICCLOUDSYNCINGOBJECT m ON m.Z_PK = a.ZMEDIA AND m.Z_ENT = 11
+                WHERE a.ZNOTE = \(noteID)
+                  AND a.Z_ENT = 5
+                ORDER BY a.Z_PK
+            """
+            let rows = try Row.fetchAll(db, sql: sql)
+            return try rows.map { try NoteAttachment(row: $0) }
+        }
+    }
+
+    /// Get the account UUID (needed for media file paths)
+    public func getAccountUUID() throws -> String? {
+        let accountsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Group Containers/group.com.apple.notes/Accounts")
+
+        let contents = try? FileManager.default.contentsOfDirectory(
+            at: accountsDir,
+            includingPropertiesForKeys: nil
+        )
+
+        return contents?.first?.lastPathComponent
+    }
+
+    /// Get the base directory for Apple Notes data
+    public static var notesBaseDir: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Group Containers/group.com.apple.notes")
+    }
+
+    /// Get table content from ZMERGEABLEDATA1
+    public func getTableContent(attachmentID: Int64) throws -> String? {
+        try dbQueue.read { db in
+            let sql = """
+                SELECT ZMERGEABLEDATA1, ZSUMMARY
+                FROM ZICCLOUDSYNCINGOBJECT
+                WHERE Z_PK = \(attachmentID)
+            """
+            if let row = try Row.fetchOne(db, sql: sql) {
+                // First try the summary (plain text rendering)
+                if let summary: String = row["ZSUMMARY"], !summary.isEmpty {
+                    return summary
+                }
+                // TODO: Parse ZMERGEABLEDATA1 protobuf for full table structure
+            }
+            return nil
+        }
+    }
 }
 
 // MARK: - Errors

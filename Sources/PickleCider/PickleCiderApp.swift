@@ -312,7 +312,7 @@ class AppState: ObservableObject {
         }
     }
 
-    /// Export all Apple Notes to markdown files
+    /// Export all Apple Notes to markdown files with attachments
     func exportAllAppleNotes(to baseURL: URL) {
         guard let reader = notesReader else {
             lastError = "Notes reader not available"
@@ -324,8 +324,10 @@ class AppState: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 let notes = try reader.getAllNotes()
+                let accountUUID = try reader.getAccountUUID()
                 var exportedCount = 0
                 var skippedCount = 0
+                var attachmentCount = 0
 
                 for note in notes {
                     // Skip password protected notes
@@ -340,15 +342,62 @@ class AppState: ObservableObject {
                     try FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
 
                     // Create filename from title
-                    let filename = note.safeFilename + ".md"
+                    let noteSafeFilename = note.safeFilename
+                    let filename = noteSafeFilename + ".md"
                     let filePath = folderPath.appendingPathComponent(filename)
 
-                    // Get note content - need to parse it from rawData
-                    let plaintext: String
+                    // Get attachments for this note
+                    let attachments = try reader.getAttachments(noteID: note.id)
+                    var attachmentMarkdown: [String: String] = [:] // uuid -> markdown
+
+                    // Create attachments folder if needed
+                    let attachmentsDir = folderPath.appendingPathComponent("_attachments").appendingPathComponent(noteSafeFilename)
+                    if !attachments.isEmpty {
+                        try FileManager.default.createDirectory(at: attachmentsDir, withIntermediateDirectories: true)
+                    }
+
+                    // Process attachments
+                    for attachment in attachments {
+                        switch attachment.attachmentType {
+                        case .image, .video, .audio, .file:
+                            // Copy media file
+                            if let accountUUID = accountUUID,
+                               let sourcePath = attachment.mediaFilePath(accountUUID: accountUUID, baseDir: NotesReader.notesBaseDir) {
+                                let destFilename = attachment.filename ?? "\(attachment.uuid).\(sourcePath.pathExtension)"
+                                let destPath = attachmentsDir.appendingPathComponent(destFilename)
+                                try? FileManager.default.copyItem(at: sourcePath, to: destPath)
+
+                                let relativePath = "_attachments/\(noteSafeFilename)/\(destFilename)"
+                                if attachment.attachmentType == .image {
+                                    attachmentMarkdown[attachment.uuid] = "![\(destFilename)](\(relativePath))"
+                                } else {
+                                    attachmentMarkdown[attachment.uuid] = "[\(destFilename)](\(relativePath))"
+                                }
+                                attachmentCount += 1
+                            }
+
+                        case .table:
+                            // Get table content
+                            if let tableContent = try? reader.getTableContent(attachmentID: attachment.id),
+                               !tableContent.isEmpty {
+                                // Convert table summary to markdown table format
+                                let tableMarkdown = self?.formatTableAsMarkdown(tableContent) ?? tableContent
+                                attachmentMarkdown[attachment.uuid] = "\n\n" + tableMarkdown + "\n\n"
+                            }
+
+                        case .drawing:
+                            attachmentMarkdown[attachment.uuid] = "[Drawing]"
+
+                        case .link:
+                            attachmentMarkdown[attachment.uuid] = "[Link]"
+                        }
+                    }
+
+                    // Get note content
+                    var plaintext: String
                     if let text = note.plaintext, !text.isEmpty {
                         plaintext = text
                     } else if let data = note.rawData {
-                        // Parse protobuf content
                         do {
                             let parser = ProtobufParser()
                             let content = try parser.parseNoteData(data)
@@ -362,6 +411,24 @@ class AppState: ObservableObject {
                         continue
                     }
 
+                    // Replace attachment placeholders (U+FFFC) with markdown
+                    // The object replacement character marks where attachments go
+                    var index = 0
+                    var processedText = ""
+                    for char in plaintext {
+                        if char == "\u{FFFC}" && index < attachments.count {
+                            let attachment = attachments[index]
+                            if let md = attachmentMarkdown[attachment.uuid] {
+                                processedText += md
+                            } else {
+                                processedText += "[attachment]"
+                            }
+                            index += 1
+                        } else {
+                            processedText.append(char)
+                        }
+                    }
+
                     var md = "---\n"
                     md += "title: \"\(note.displayTitle.replacingOccurrences(of: "\"", with: "\\\""))\"\n"
                     if let folder = note.folderName {
@@ -373,8 +440,11 @@ class AppState: ObservableObject {
                     if let modified = note.modificationDate {
                         md += "modified: \(ISO8601DateFormatter().string(from: modified))\n"
                     }
+                    if !attachments.isEmpty {
+                        md += "attachments: \(attachments.count)\n"
+                    }
                     md += "---\n\n"
-                    md += plaintext
+                    md += processedText
 
                     try md.write(to: filePath, atomically: true, encoding: .utf8)
                     exportedCount += 1
@@ -382,11 +452,14 @@ class AppState: ObservableObject {
 
                 DispatchQueue.main.async {
                     self?.isLoading = false
-                    if skippedCount > 0 {
-                        self?.lastError = "Exported \(exportedCount) notes, skipped \(skippedCount) (locked/empty)"
-                    } else {
-                        self?.lastError = nil
+                    var message = "Exported \(exportedCount) notes"
+                    if attachmentCount > 0 {
+                        message += ", \(attachmentCount) attachments"
                     }
+                    if skippedCount > 0 {
+                        message += ", skipped \(skippedCount) (locked/empty)"
+                    }
+                    self?.lastError = message
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -395,6 +468,56 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Format table summary text as a markdown table
+    private func formatTableAsMarkdown(_ summary: String) -> String {
+        // Table summaries come as "Header:\nValue\nHeader:\nValue" format
+        let lines = summary.components(separatedBy: "\n").filter { !$0.isEmpty }
+
+        // Try to detect if it's a key-value table
+        var rows: [[String]] = []
+        var currentRow: [String] = []
+        var isKeyValue = false
+
+        for line in lines {
+            if line.hasSuffix(":") {
+                // This looks like a header/key
+                if !currentRow.isEmpty {
+                    rows.append(currentRow)
+                    currentRow = []
+                }
+                currentRow.append(String(line.dropLast()))
+                isKeyValue = true
+            } else {
+                currentRow.append(line)
+                if isKeyValue && currentRow.count >= 2 {
+                    rows.append(currentRow)
+                    currentRow = []
+                }
+            }
+        }
+        if !currentRow.isEmpty {
+            rows.append(currentRow)
+        }
+
+        guard !rows.isEmpty else { return summary }
+
+        // Determine column count
+        let maxCols = rows.map { $0.count }.max() ?? 1
+
+        // Build markdown table
+        var md = "| " + (0..<maxCols).map { "Column \($0 + 1)" }.joined(separator: " | ") + " |\n"
+        md += "| " + (0..<maxCols).map { _ in "---" }.joined(separator: " | ") + " |\n"
+
+        for row in rows {
+            let cells = (0..<maxCols).map { i in
+                i < row.count ? row[i].replacingOccurrences(of: "|", with: "\\|") : ""
+            }
+            md += "| " + cells.joined(separator: " | ") + " |\n"
+        }
+
+        return md
     }
 }
 
