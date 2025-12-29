@@ -132,17 +132,41 @@ sudo cp "$BUILD_DIR/pickle" /usr/local/bin/pickle
 sudo chmod +x /usr/local/bin/cider /usr/local/bin/pickle
 sudo xattr -cr /usr/local/bin/cider /usr/local/bin/pickle
 
+# Install and start the Pickle daemon
+echo ""
+echo "Setting up Pickle daemon..."
+mkdir -p ~/.pickle/logs
+
+# Install daemon (creates launchd plist)
+/usr/local/bin/pickle install --force 2>/dev/null || /usr/local/bin/pickle install 2>/dev/null || true
+
+# Load daemon
+launchctl load ~/Library/LaunchAgents/com.pickle.daemon.plist 2>/dev/null || true
+
 echo ""
 echo "=========================================="
 echo "✅ Build complete!"
 echo ""
 echo "Installed:"
-echo "  /Applications/Pickle Cider.app"
-echo "  /usr/local/bin/cider"
-echo "  /usr/local/bin/pickle"
+echo "  📱 /Applications/Pickle Cider.app"
+echo "  🍺 /usr/local/bin/cider"
+echo "  🥒 /usr/local/bin/pickle"
+echo ""
+echo "Daemon status:"
+/usr/local/bin/pickle status 2>/dev/null | grep -E "Daemon:|✓|✗|⚠" || echo "  Run: pickle status"
 echo ""
 echo "Signatures:"
-codesign -dv "$APP_DIR/Contents/MacOS/PickleCider" 2>&1 | grep -E "Identifier|Signature" || true
-codesign -dv /usr/local/bin/cider 2>&1 | grep -E "Identifier|Signature" || true
+codesign -dv "$APP_DIR/Contents/MacOS/PickleCider" 2>&1 | grep -E "Authority" | head -1 || true
 echo ""
-echo "Next: Add to Full Disk Access in System Settings"
+echo "=========================================="
+echo "NEXT STEPS:"
+echo ""
+echo "1. Grant Full Disk Access:"
+echo "   System Settings → Privacy & Security → Full Disk Access"
+echo "   Click + and add '/Applications/Pickle Cider.app'"
+echo ""
+echo "2. Quit and relaunch Pickle Cider (required after granting FDA)"
+echo ""
+echo "3. The Pickle daemon is now monitoring your notes!"
+echo "   Check status: pickle status"
+echo "=========================================="

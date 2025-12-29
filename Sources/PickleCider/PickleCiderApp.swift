@@ -206,6 +206,12 @@ struct TrackedNote: Identifiable {
 
 struct LaunchDaemonHelper {
     static let plistLabel = "com.pickle.daemon"
+    static let plistPath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/LaunchAgents/com.pickle.daemon.plist")
+
+    static var isInstalled: Bool {
+        FileManager.default.fileExists(atPath: plistPath.path)
+    }
 
     static var isRunning: Bool {
         let task = Process()
@@ -223,10 +229,26 @@ struct LaunchDaemonHelper {
         }
     }
 
+    static func install() {
+        // Use pickle CLI to install the daemon
+        let task = Process()
+        task.launchPath = "/usr/local/bin/pickle"
+        task.arguments = ["install"]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        try? task.run()
+        task.waitUntilExit()
+    }
+
     static func start() {
+        // Auto-install if not installed
+        if !isInstalled {
+            install()
+        }
+
         let task = Process()
         task.launchPath = "/bin/launchctl"
-        task.arguments = ["start", plistLabel]
+        task.arguments = ["load", plistPath.path]
         try? task.run()
         task.waitUntilExit()
     }
@@ -234,7 +256,7 @@ struct LaunchDaemonHelper {
     static func stop() {
         let task = Process()
         task.launchPath = "/bin/launchctl"
-        task.arguments = ["stop", plistLabel]
+        task.arguments = ["unload", plistPath.path]
         try? task.run()
         task.waitUntilExit()
     }
