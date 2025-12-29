@@ -125,24 +125,56 @@ fi
 # Remove quarantine
 sudo xattr -cr "$APP_DIR"
 
-# Install CLI tools
+# Install CLI tools (symlinks to avoid provenance issues)
 echo ""
 echo "Installing CLI tools..."
 sudo mkdir -p /usr/local/bin
-sudo cp "$BUILD_DIR/cider" /usr/local/bin/cider
-sudo cp "$BUILD_DIR/pickle" /usr/local/bin/pickle
-sudo chmod +x /usr/local/bin/cider /usr/local/bin/pickle
-sudo xattr -cr /usr/local/bin/cider /usr/local/bin/pickle
+sudo rm -f /usr/local/bin/cider /usr/local/bin/pickle 2>/dev/null
+sudo ln -sf "$BUILD_DIR/cider" /usr/local/bin/cider
+sudo ln -sf "$BUILD_DIR/pickle" /usr/local/bin/pickle
 
 # Install and start the Pickle daemon
 echo ""
 echo "Setting up Pickle daemon..."
 mkdir -p ~/.pickle/logs
 
-# Install daemon (creates launchd plist)
-/usr/local/bin/pickle install --force 2>/dev/null || /usr/local/bin/pickle install 2>/dev/null || true
+# Create daemon plist pointing to build directory (avoids provenance issues)
+DAEMON_PICKLE="$BUILD_DIR/pickle"
+cat > ~/Library/LaunchAgents/com.pickle.daemon.plist << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pickle.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$DAEMON_PICKLE</string>
+        <string>daemon</string>
+        <string>--interval</string>
+        <string>30</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>$HOME/.pickle/logs/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME/.pickle/logs/stderr.log</string>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>LowPriorityBackgroundIO</key>
+    <true/>
+</dict>
+</plist>
+PLIST
 
 # Load daemon
+launchctl unload ~/Library/LaunchAgents/com.pickle.daemon.plist 2>/dev/null || true
 launchctl load ~/Library/LaunchAgents/com.pickle.daemon.plist 2>/dev/null || true
 
 echo ""
@@ -169,10 +201,11 @@ echo "   Click + and add '/Applications/Pickle Cider.app'"
 echo ""
 echo "2. Grant FDA to the daemon (for automatic version tracking):"
 echo "   In Full Disk Access, click +"
-echo "   Press Cmd+Shift+G, enter: /Applications/Pickle Cider.app/Contents/MacOS/pickle"
+echo "   Press Cmd+Shift+G, enter: $BUILD_DIR/pickle"
 echo ""
-echo "3. Restart the daemon:"
-echo "   pickle stop && pickle start"
+echo "3. Reload the daemon:"
+echo "   launchctl unload ~/Library/LaunchAgents/com.pickle.daemon.plist"
+echo "   launchctl load ~/Library/LaunchAgents/com.pickle.daemon.plist"
 echo ""
 echo "4. Check status: pickle status"
 echo "=========================================="
