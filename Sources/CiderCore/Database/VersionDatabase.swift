@@ -50,8 +50,8 @@ public final class VersionDatabase: @unchecked Sendable {
                 t.column("title", .text)
                 t.column("folder_path", .text)
                 t.column("is_deleted", .boolean).notNull().defaults(to: false)
-                t.column("created_at", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
-                t.column("updated_at", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
+                t.column("created_at", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
+                t.column("updated_at", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
             }
 
             // Versions table
@@ -66,7 +66,7 @@ public final class VersionDatabase: @unchecked Sendable {
                 t.column("word_count", .integer).notNull().defaults(to: 0)
                 t.column("change_summary", .text)
                 t.column("apple_mtime", .integer)
-                t.column("captured_at", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
+                t.column("captured_at", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
 
                 t.uniqueKey(["note_id", "version_number"])
             }

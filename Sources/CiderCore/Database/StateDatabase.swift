@@ -44,8 +44,8 @@ public final class StateDatabase: @unchecked Sendable {
                 t.column("remote_mtime", .integer)
                 t.column("sync_status", .text).notNull().defaults(to: "new_local")
                 t.column("last_sync", .integer)
-                t.column("created_at", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
-                t.column("updated_at", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
+                t.column("created_at", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
+                t.column("updated_at", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
             }
 
             // Folder mapping table
@@ -54,7 +54,7 @@ public final class StateDatabase: @unchecked Sendable {
                 t.column("local_path", .text).notNull().unique()
                 t.column("note_folder_uuid", .text)
                 t.column("note_folder_name", .text).notNull()
-                t.column("created_at", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
+                t.column("created_at", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
             }
 
             // Sync log for debugging
@@ -65,7 +65,7 @@ public final class StateDatabase: @unchecked Sendable {
                 t.column("note_uuid", .text)
                 t.column("status", .text).notNull()
                 t.column("error_message", .text)
-                t.column("timestamp", .integer).notNull().defaults(sql: "strftime('%s', 'now')")
+                t.column("timestamp", .integer).notNull().defaults(sql: "(strftime('%s', 'now'))")
             }
 
             // Indexes
