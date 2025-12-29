@@ -36,13 +36,131 @@ class AppState: ObservableObject {
     @Published var daemonRunning: Bool = false
     @Published var hasFullDiskAccess: Bool = true
     @Published var needsOnboarding: Bool = false
+    @Published var inAppMonitoringActive: Bool = false
+    @Published var lastMonitorCheck: Date?
 
     private var notesReader: NotesReader?
     private var versionDB: VersionDatabase?
     private var stateDB: StateDatabase?
+    private var monitorTimer: Timer?
+    private let monitorInterval: TimeInterval = 30
 
     init() {
         checkPermissionsAndRefresh()
+        startInAppMonitoring()
+    }
+
+    deinit {
+        stopInAppMonitoring()
+    }
+
+    /// Start in-app background monitoring (inherits app's FDA)
+    func startInAppMonitoring() {
+        guard monitorTimer == nil else { return }
+
+        monitorTimer = Timer.scheduledTimer(withTimeInterval: monitorInterval, repeats: true) { [weak self] _ in
+            self?.performMonitorCheck()
+        }
+
+        // Initial check after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.performMonitorCheck()
+        }
+
+        DispatchQueue.main.async {
+            self.inAppMonitoringActive = true
+        }
+    }
+
+    func stopInAppMonitoring() {
+        monitorTimer?.invalidate()
+        monitorTimer = nil
+        inAppMonitoringActive = false
+    }
+
+    private func performMonitorCheck() {
+        guard hasFullDiskAccess else { return }
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+
+            do {
+                let reader = try NotesReader()
+                let versionDB = try VersionDatabase()
+                let parser = ProtobufParser()
+
+                let notes = try reader.getAllNotes()
+                let knownStates = try versionDB.getAllMonitorStates()
+                let knownMap = Dictionary(uniqueKeysWithValues: knownStates.map { ($0.noteUUID, $0) })
+
+                var savedCount = 0
+
+                for note in notes {
+                    if note.isPasswordProtected { continue }
+
+                    var plaintext = ""
+                    if let rawData = note.rawData {
+                        if let parsed = try? parser.parseNoteData(rawData) {
+                            plaintext = parsed.plaintext
+                        }
+                    }
+
+                    let currentHash = plaintext.sha256Hash
+                    let modTime = note.modificationDate ?? Date()
+
+                    let needsSave: Bool
+                    if let known = knownMap[note.uuid] {
+                        needsSave = currentHash != known.lastHash
+                    } else {
+                        needsSave = true
+                    }
+
+                    if needsSave {
+                        let noteRecord = try versionDB.getOrCreateNote(
+                            uuid: note.uuid,
+                            title: note.displayTitle,
+                            folderPath: note.folderName
+                        )
+
+                        if let noteID = noteRecord.id {
+                            // Check if content actually changed
+                            var shouldSave = true
+                            if let lastVersion = try? versionDB.getLatestVersion(noteID: noteID),
+                               let lastContent = try? versionDB.loadVersionContent(storagePath: lastVersion.storagePath) {
+                                shouldSave = lastContent.content.plaintext != plaintext
+                            }
+
+                            if shouldSave {
+                                let content = VersionContent(
+                                    noteUUID: note.uuid,
+                                    appleNoteID: nil,
+                                    title: note.displayTitle,
+                                    folderPath: note.folderName,
+                                    capturedAt: Date(),
+                                    appleModificationDate: note.modificationDate,
+                                    plaintext: plaintext,
+                                    html: nil,
+                                    rawProtobuf: note.rawData
+                                )
+                                _ = try versionDB.saveVersion(noteID: noteID, content: content)
+                                savedCount += 1
+                            }
+                        }
+
+                        try versionDB.updateMonitorState(uuid: note.uuid, hash: currentHash, mtime: modTime)
+                    }
+                }
+
+                DispatchQueue.main.async {
+                    self.lastMonitorCheck = Date()
+                    if savedCount > 0 {
+                        self.refresh() // Refresh UI if versions were saved
+                    }
+                }
+            } catch {
+                // Silently fail - will retry next interval
+            }
+        }
     }
 
     /// Check if we have Full Disk Access by attempting to read a protected file
