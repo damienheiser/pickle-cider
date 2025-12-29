@@ -193,6 +193,91 @@ class AppState: ObservableObject {
             }
         }
     }
+
+    /// Export all Apple Notes to markdown files
+    func exportAllAppleNotes(to baseURL: URL) {
+        guard let reader = notesReader else {
+            lastError = "Notes reader not available"
+            return
+        }
+
+        isLoading = true
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let notes = try reader.getAllNotes()
+                var exportedCount = 0
+                var skippedCount = 0
+
+                for note in notes {
+                    // Skip password protected notes
+                    if note.isPasswordProtected {
+                        skippedCount += 1
+                        continue
+                    }
+
+                    // Create folder path based on note's folder
+                    let folderName = (note.folderName ?? "Notes").sanitizedForFilename
+                    let folderPath = baseURL.appendingPathComponent(folderName)
+                    try FileManager.default.createDirectory(at: folderPath, withIntermediateDirectories: true)
+
+                    // Create filename from title
+                    let filename = note.safeFilename + ".md"
+                    let filePath = folderPath.appendingPathComponent(filename)
+
+                    // Get note content - need to parse it from rawData
+                    let plaintext: String
+                    if let text = note.plaintext, !text.isEmpty {
+                        plaintext = text
+                    } else if let data = note.rawData {
+                        // Parse protobuf content
+                        do {
+                            let parser = ProtobufParser()
+                            let content = try parser.parseNoteData(data)
+                            plaintext = content.plaintext
+                        } catch {
+                            skippedCount += 1
+                            continue
+                        }
+                    } else {
+                        skippedCount += 1
+                        continue
+                    }
+
+                    var md = "---\n"
+                    md += "title: \"\(note.displayTitle.replacingOccurrences(of: "\"", with: "\\\""))\"\n"
+                    if let folder = note.folderName {
+                        md += "folder: \"\(folder)\"\n"
+                    }
+                    if let created = note.creationDate {
+                        md += "created: \(ISO8601DateFormatter().string(from: created))\n"
+                    }
+                    if let modified = note.modificationDate {
+                        md += "modified: \(ISO8601DateFormatter().string(from: modified))\n"
+                    }
+                    md += "---\n\n"
+                    md += plaintext
+
+                    try md.write(to: filePath, atomically: true, encoding: .utf8)
+                    exportedCount += 1
+                }
+
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    if skippedCount > 0 {
+                        self?.lastError = "Exported \(exportedCount) notes, skipped \(skippedCount) (locked/empty)"
+                    } else {
+                        self?.lastError = nil
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    self?.lastError = "Export failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
 }
 
 struct TrackedNote: Identifiable {

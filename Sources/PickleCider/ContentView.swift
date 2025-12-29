@@ -107,11 +107,8 @@ struct ContentView: View {
     }
 
     private func exportAllNotes(to url: URL) {
-        for note in appState.trackedNotes {
-            let noteDir = url.appendingPathComponent(note.title.sanitizedForFilename)
-            try? FileManager.default.createDirectory(at: noteDir, withIntermediateDirectories: true)
-            appState.exportNote(note, to: noteDir)
-        }
+        // Export all Apple Notes (not just tracked ones)
+        appState.exportAllAppleNotes(to: url)
     }
 
     private func importFiles(_ urls: [URL]) {
