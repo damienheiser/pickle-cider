@@ -1,5 +1,6 @@
 import SwiftUI
 import CiderCore
+import AppKit
 
 @main
 struct PickleCiderApp: App {
@@ -33,13 +34,61 @@ class AppState: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastError: String?
     @Published var daemonRunning: Bool = false
+    @Published var hasFullDiskAccess: Bool = true
+    @Published var needsOnboarding: Bool = false
 
     private var notesReader: NotesReader?
     private var versionDB: VersionDatabase?
     private var stateDB: StateDatabase?
 
     init() {
-        refresh()
+        checkPermissionsAndRefresh()
+    }
+
+    /// Check if we have Full Disk Access by attempting to read a protected file
+    func checkFullDiskAccess() -> Bool {
+        let notesDBPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Group Containers/group.com.apple.notes/NoteStore.sqlite")
+
+        // Try to open the file for reading
+        if FileManager.default.isReadableFile(atPath: notesDBPath.path) {
+            // File exists and is readable, but we need to actually try to open it
+            // because isReadableFile doesn't check Full Disk Access
+            do {
+                let handle = try FileHandle(forReadingFrom: notesDBPath)
+                handle.closeFile()
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        // If file doesn't exist, user might not have Notes set up - that's okay
+        return !FileManager.default.fileExists(atPath: notesDBPath.path)
+    }
+
+    func checkPermissionsAndRefresh() {
+        let hasAccess = checkFullDiskAccess()
+
+        DispatchQueue.main.async {
+            self.hasFullDiskAccess = hasAccess
+            self.needsOnboarding = !hasAccess
+        }
+
+        if hasAccess {
+            refresh()
+        } else {
+            DispatchQueue.main.async {
+                self.isLoading = false
+            }
+        }
+    }
+
+    func openSystemPreferences() {
+        // Open System Settings > Privacy & Security > Full Disk Access
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func refresh() {
@@ -52,7 +101,6 @@ class AppState: ObservableObject {
                 self?.notesReader = reader
 
                 let noteCount = try reader.getNoteCount()
-                let folderCount = try reader.getFolderCount()
 
                 // Version database
                 let versionDB = try VersionDatabase()
@@ -87,10 +135,23 @@ class AppState: ObservableObject {
                     self?.daemonRunning = daemonRunning
                     self?.isLoading = false
                     self?.lastError = nil
+                    self?.hasFullDiskAccess = true
+                    self?.needsOnboarding = false
                 }
             } catch {
+                let errorMessage = error.localizedDescription
+                let isPermissionError = errorMessage.contains("authorization denied") ||
+                                        errorMessage.contains("not permitted") ||
+                                        errorMessage.contains("SQLite error 23")
+
                 DispatchQueue.main.async {
-                    self?.lastError = error.localizedDescription
+                    if isPermissionError {
+                        self?.hasFullDiskAccess = false
+                        self?.needsOnboarding = true
+                        self?.lastError = nil
+                    } else {
+                        self?.lastError = errorMessage
+                    }
                     self?.isLoading = false
                 }
             }

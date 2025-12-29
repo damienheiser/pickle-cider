@@ -18,31 +18,36 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Header with logo
-                HeaderView()
+            if appState.needsOnboarding {
+                // Show onboarding/permission request
+                OnboardingView()
+            } else {
+                VStack(spacing: 0) {
+                    // Header with logo
+                    HeaderView()
+                        .padding()
+
+                    // Stats cards
+                    StatsCardsView()
+                        .padding(.horizontal)
+
+                    Divider()
+                        .background(Color.white.opacity(0.2))
+                        .padding(.vertical)
+
+                    // Notes list
+                    NotesListView(selectedNote: $selectedNote)
+                        .padding(.horizontal)
+
+                    Spacer()
+
+                    // Action buttons
+                    ActionButtonsView(
+                        showingExportPanel: $showingExportPanel,
+                        showingImportPanel: $showingImportPanel
+                    )
                     .padding()
-
-                // Stats cards
-                StatsCardsView()
-                    .padding(.horizontal)
-
-                Divider()
-                    .background(Color.white.opacity(0.2))
-                    .padding(.vertical)
-
-                // Notes list
-                NotesListView(selectedNote: $selectedNote)
-                    .padding(.horizontal)
-
-                Spacer()
-
-                // Action buttons
-                ActionButtonsView(
-                    showingExportPanel: $showingExportPanel,
-                    showingImportPanel: $showingImportPanel
-                )
-                .padding()
+                }
             }
 
             // Drop overlay
@@ -464,6 +469,136 @@ struct LoadingOverlayView: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+// MARK: - Onboarding View
+
+struct OnboardingView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            // Pickle jar icon
+            PickleJarIcon()
+                .frame(width: 120, height: 120)
+
+            Text("Welcome to Pickle Cider")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            Text("Apple Notes Backup & Sync")
+                .font(.title3)
+                .foregroundColor(.white.opacity(0.7))
+
+            Spacer()
+
+            // Permission request card
+            VStack(spacing: 16) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 44))
+                    .foregroundColor(Color(hex: "9ACD32"))
+
+                Text("Full Disk Access Required")
+                    .font(.headline)
+                    .foregroundColor(.white)
+
+                Text("Pickle Cider needs Full Disk Access to read your Apple Notes database. Your notes never leave your Mac.")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                Divider()
+                    .background(Color.white.opacity(0.2))
+                    .padding(.vertical, 8)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("1.")
+                            .font(.headline)
+                            .foregroundColor(Color(hex: "9ACD32"))
+                        Text("Click \"Open System Settings\" below")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("2.")
+                            .font(.headline)
+                            .foregroundColor(Color(hex: "9ACD32"))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Click the + button and add:")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.8))
+                            Text("• Pickle Cider (from Applications)")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.6))
+                            Text("• Terminal (if using CLI tools)")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 12) {
+                        Text("3.")
+                            .font(.headline)
+                            .foregroundColor(Color(hex: "9ACD32"))
+                        Text("Quit and reopen Pickle Cider")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+
+                Text("Note: You must quit and reopen after granting access")
+                    .font(.caption)
+                    .foregroundColor(Color(hex: "9ACD32"))
+                    .padding(.top, 8)
+            }
+            .padding(24)
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(16)
+            .padding(.horizontal, 32)
+
+            Spacer()
+
+            // Action buttons
+            VStack(spacing: 12) {
+                Button {
+                    appState.openSystemPreferences()
+                } label: {
+                    HStack {
+                        Image(systemName: "gear")
+                        Text("Open System Settings")
+                    }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color(hex: "9ACD32"))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    appState.checkPermissionsAndRefresh()
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("I've Granted Access - Retry")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 24)
+        }
     }
 }
 
