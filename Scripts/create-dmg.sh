@@ -11,8 +11,8 @@ DMG_DIR="$PROJECT_DIR/.build/dmg"
 VERSION="${1:-1.0.0}"
 
 APP_NAME="Pickle Cider"
-DMG_NAME="Apple-Notes-Tools-v$VERSION"
-VOLUME_NAME="Apple Notes Tools"
+DMG_NAME="Pickle-Cider-v$VERSION"
+VOLUME_NAME="Pickle Cider"
 
 echo "Creating DMG Installer v$VERSION"
 echo "================================"
@@ -60,6 +60,10 @@ cp "$DMG_DIR/resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icn
 # Create PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
+# Ad-hoc sign the app (required for Full Disk Access to work)
+echo "  Signing app bundle..."
+codesign --force --deep --sign - "$APP_BUNDLE"
+
 echo "  Created: $APP_NAME.app"
 
 # ============================================
@@ -74,6 +78,10 @@ mkdir -p "$CLI_DIR"
 cp "$BUILD_DIR/cider" "$CLI_DIR/cider"
 cp "$BUILD_DIR/pickle" "$CLI_DIR/pickle"
 chmod +x "$CLI_DIR/cider" "$CLI_DIR/pickle"
+
+# Sign CLI tools
+codesign --force --sign - "$CLI_DIR/cider"
+codesign --force --sign - "$CLI_DIR/pickle"
 
 # Create install script for CLI tools
 cat > "$CLI_DIR/install-cli.command" << 'INSTALL_EOF'

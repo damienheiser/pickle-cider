@@ -9,7 +9,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/.build/release-universal"
 VERSION="${1:-1.0.0}"
 
-echo "Building Cider & Pickle v$VERSION"
+echo "Building Pickle Cider v$VERSION"
 echo "================================="
 echo ""
 
@@ -64,7 +64,7 @@ file "$BUILD_DIR/PickleCider"
 # Create release archive
 echo ""
 echo "Creating release archive..."
-ARCHIVE_NAME="apple-notes-tools-v$VERSION-macos-universal.tar.gz"
+ARCHIVE_NAME="pickle-cider-v$VERSION-macos-universal.tar.gz"
 cd "$BUILD_DIR"
 tar -czf "$ARCHIVE_NAME" cider pickle PickleCider
 

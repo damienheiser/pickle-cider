@@ -1,6 +1,6 @@
-# Cider, Pickle & Pickle Cider - Apple Notes Tools
+# Pickle Cider
 
-Three powerful native macOS tools for Apple Notes: two CLI tools and a beautiful SwiftUI GUI app.
+Three powerful native macOS tools for working with Apple Notes: a beautiful SwiftUI GUI app and two CLI tools.
 
 ## Cider - "Press your notes into something useful"
 
@@ -17,8 +17,8 @@ Bidirectional sync between Apple Notes and markdown files.
 
 ```bash
 # Build from source
-git clone https://github.com/yourusername/apple-notes-tools
-cd apple-notes-tools
+git clone https://github.com/damienheiser/pickle-cider
+cd pickle-cider
 swift build -c release
 
 # Install
@@ -170,8 +170,8 @@ pickle uninstall
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/apple-notes-tools
-cd apple-notes-tools
+git clone https://github.com/damienheiser/pickle-cider
+cd pickle-cider
 
 # Build debug
 swift build
