@@ -88,13 +88,23 @@ sudo cp .build/release/cider .build/release/pickle /usr/local/bin/
 
 ## Granting Full Disk Access
 
-After installation, you must grant Full Disk Access:
+After installation, you must grant Full Disk Access to the components you want to use:
 
+### For the GUI App
 1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
-2. Click the **+** button
-3. Add **Pickle Cider.app** (from Applications)
-4. Also add **Terminal.app** if using CLI tools
-5. **Quit and reopen** the app (required for changes to take effect)
+2. Click **+** and add `/Applications/Pickle Cider.app`
+3. **Quit and reopen** the app (required for changes to take effect)
+
+### For the Pickle Daemon (automatic version tracking)
+The daemon runs in the background and needs its own FDA permission:
+1. In Full Disk Access, click **+**
+2. Press `Cmd+Shift+G` and enter: `/Applications/Pickle Cider.app/Contents/MacOS/pickle`
+3. Click Add, then restart the daemon: `pickle stop && pickle start`
+
+### For CLI Tools (Terminal)
+If using `cider` or `pickle` from Terminal:
+1. Add **Terminal.app** (or your terminal app) to Full Disk Access
+2. Restart your terminal
 
 ---
 

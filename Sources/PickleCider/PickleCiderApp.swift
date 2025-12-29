@@ -314,11 +314,20 @@ struct LaunchDaemonHelper {
         }
     }
 
+    static var picklePath: String {
+        // Prefer app bundle path for Full Disk Access inheritance
+        let appBundlePath = "/Applications/Pickle Cider.app/Contents/MacOS/pickle"
+        if FileManager.default.isExecutableFile(atPath: appBundlePath) {
+            return appBundlePath
+        }
+        return "/usr/local/bin/pickle"
+    }
+
     static func install() {
         // Use pickle CLI to install the daemon
         let task = Process()
-        task.launchPath = "/usr/local/bin/pickle"
-        task.arguments = ["install"]
+        task.launchPath = picklePath
+        task.arguments = ["install", "--force"]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         try? task.run()

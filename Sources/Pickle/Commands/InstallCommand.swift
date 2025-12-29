@@ -78,7 +78,9 @@ struct InstallCommand: ParsableCommand {
 
     private func findExecutablePath() -> String {
         // Try to find the pickle executable
+        // Prefer app bundle path for Full Disk Access inheritance
         let possiblePaths = [
+            "/Applications/Pickle Cider.app/Contents/MacOS/pickle",  // Preferred: inherits app's FDA
             "/usr/local/bin/pickle",
             "/opt/homebrew/bin/pickle",
             Bundle.main.executablePath,
