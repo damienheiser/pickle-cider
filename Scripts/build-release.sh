@@ -43,22 +43,30 @@ lipo -create \
     .build/x86_64-apple-macosx/release/pickle \
     -output "$BUILD_DIR/pickle"
 
+# PickleCider
+lipo -create \
+    .build/arm64-apple-macosx/release/PickleCider \
+    .build/x86_64-apple-macosx/release/PickleCider \
+    -output "$BUILD_DIR/PickleCider"
+
 # Make executable
 chmod +x "$BUILD_DIR/cider"
 chmod +x "$BUILD_DIR/pickle"
+chmod +x "$BUILD_DIR/PickleCider"
 
 # Verify
 echo ""
 echo "Verifying universal binaries..."
 file "$BUILD_DIR/cider"
 file "$BUILD_DIR/pickle"
+file "$BUILD_DIR/PickleCider"
 
 # Create release archive
 echo ""
 echo "Creating release archive..."
 ARCHIVE_NAME="apple-notes-tools-v$VERSION-macos-universal.tar.gz"
 cd "$BUILD_DIR"
-tar -czf "$ARCHIVE_NAME" cider pickle
+tar -czf "$ARCHIVE_NAME" cider pickle PickleCider
 
 echo ""
 echo "Build complete!"
@@ -66,6 +74,7 @@ echo ""
 echo "Binaries:"
 echo "  $BUILD_DIR/cider"
 echo "  $BUILD_DIR/pickle"
+echo "  $BUILD_DIR/PickleCider"
 echo ""
 echo "Archive:"
 echo "  $BUILD_DIR/$ARCHIVE_NAME"
@@ -73,3 +82,4 @@ echo ""
 echo "To install:"
 echo "  sudo cp $BUILD_DIR/cider /usr/local/bin/"
 echo "  sudo cp $BUILD_DIR/pickle /usr/local/bin/"
+echo "  cp $BUILD_DIR/PickleCider /Applications/"
