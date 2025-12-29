@@ -1,8 +1,8 @@
 # Pickle Cider
 
-Native macOS tools for working with Apple Notes - sync, backup, and version history.
+**Version 2.0** - Native macOS tools for working with Apple Notes - sync, backup, and automatic version history.
 
-**Build from source required** - macOS Full Disk Access requires apps to be signed with a developer certificate. Building locally with Xcode automatically signs the app with your personal development certificate.
+**Build from source required** - macOS Full Disk Access requires apps to be code-signed. The build script automatically creates a local signing certificate for you.
 
 ## What's Included
 
@@ -57,6 +57,9 @@ This script will:
 3. Sign all binaries properly
 4. Install the app to `/Applications/Pickle Cider.app`
 5. Install CLI tools to `/usr/local/bin/`
+6. Install and start the Pickle daemon for automatic version tracking
+
+After running, you just need to grant Full Disk Access (see below).
 
 ### Manual Build
 
