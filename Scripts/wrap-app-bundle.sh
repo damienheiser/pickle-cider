@@ -1,25 +1,27 @@
 #!/bin/bash
-# Wrap the built executable in an .app bundle
+# Wrap the Xcode-built executable in an .app bundle
+# Preserves Xcode's code signature for Full Disk Access
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Find the Xcode-built executable
-XCODE_EXEC=$(find ~/Library/Developer/Xcode/DerivedData -name "PickleCider" -type f -perm +111 2>/dev/null | head -1)
+XCODE_EXEC=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/PickleCider" -type f -perm +111 2>/dev/null | head -1)
 
 if [ -z "$XCODE_EXEC" ]; then
-    # Try the Release folder the user mentioned
-    XCODE_EXEC=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Release/PickleCider" -type f 2>/dev/null | head -1)
-fi
-
-if [ -z "$XCODE_EXEC" ]; then
-    echo "Could not find Xcode-built PickleCider executable"
-    echo "Falling back to swift build..."
-    swift build -c release
-    XCODE_EXEC="$PROJECT_DIR/.build/release/PickleCider"
+    echo "❌ Could not find Xcode-built PickleCider executable"
+    echo ""
+    echo "Please build in Xcode first:"
+    echo "  1. Open Package.swift in Xcode"
+    echo "  2. Product → Build For → Profiling (⇧⌘I)"
+    exit 1
 fi
 
 echo "Using executable: $XCODE_EXEC"
+
+# Check if it's signed
+SIGNATURE=$(codesign -dv "$XCODE_EXEC" 2>&1 | grep "Signature=" || true)
+echo "Signature: $SIGNATURE"
 
 # Create app bundle
 APP_DIR="/Applications/Pickle Cider.app"
@@ -29,9 +31,8 @@ sudo rm -rf "$APP_DIR"
 sudo mkdir -p "$APP_DIR/Contents/MacOS"
 sudo mkdir -p "$APP_DIR/Contents/Resources"
 
-# Copy executable
-sudo cp "$XCODE_EXEC" "$APP_DIR/Contents/MacOS/PickleCider"
-sudo chmod +x "$APP_DIR/Contents/MacOS/PickleCider"
+# Copy executable (preserving signature)
+sudo cp -p "$XCODE_EXEC" "$APP_DIR/Contents/MacOS/PickleCider"
 
 # Copy Info.plist
 sudo cp "$PROJECT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
@@ -51,15 +52,20 @@ if [ -d "$ICON_DIR/AppIcon.iconset" ]; then
 fi
 rm -rf "$ICON_DIR"
 
-# Re-sign the app bundle (uses the same signature as the executable)
-echo "Signing app bundle..."
-sudo codesign --force --deep --sign - "$APP_DIR"
+# Remove quarantine attribute
+sudo xattr -cr "$APP_DIR"
+
+# DON'T re-sign - preserve Xcode's signature on the executable
+# The bundle itself doesn't need to be signed for FDA to work
 
 echo ""
 echo "✅ App bundle created: $APP_DIR"
 echo ""
+echo "Verifying executable signature..."
+codesign -dv "$APP_DIR/Contents/MacOS/PickleCider" 2>&1 | head -5
+
+echo ""
 echo "Now:"
 echo "1. Open System Settings → Privacy & Security → Full Disk Access"
-echo "2. Remove old 'Pickle Cider' entry if present"
-echo "3. Click + and add '/Applications/Pickle Cider.app'"
-echo "4. Quit and reopen the app"
+echo "2. Remove old entries, click + and add '$APP_DIR'"
+echo "3. Launch from Applications"

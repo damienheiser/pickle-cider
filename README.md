@@ -37,66 +37,48 @@ pickle restore 5                  # Restore to version
 
 ### Requirements
 - macOS 13.0 (Ventura) or later
-- Xcode 15+ (for building)
+- Xcode Command Line Tools (`xcode-select --install`)
 - Full Disk Access permission
 
-### Option 1: Build with Xcode (Recommended)
-
-This method automatically signs the app with your personal development certificate.
+### Quick Install (Recommended)
 
 ```bash
 # Clone the repository
 git clone https://github.com/damienheiser/pickle-cider
 cd pickle-cider
 
-# Open Package.swift in Xcode
-open Package.swift
+# Build and install everything
+./Scripts/build-all.sh
 ```
 
-In Xcode:
-1. Wait for package dependencies to resolve
-2. Select **PickleCider** scheme (top left dropdown)
-3. Select **My Mac** as destination
-4. Product → Build (⌘B)
-5. Product → Show Build Folder in Finder
-6. Navigate to Products/Release/ and drag **PickleCider.app** to Applications
+This script will:
+1. Build all three executables (cider, pickle, PickleCider)
+2. Auto-create a local signing certificate if needed
+3. Sign all binaries properly
+4. Install the app to `/Applications/Pickle Cider.app`
+5. Install CLI tools to `/usr/local/bin/`
 
-For CLI tools, also run:
-```bash
-swift build -c release
-sudo cp .build/release/cider .build/release/pickle /usr/local/bin/
-```
-
-### Option 2: Build with Swift + Manual Signing
+### Manual Build
 
 ```bash
 # Clone and build
 git clone https://github.com/damienheiser/pickle-cider
 cd pickle-cider
+
+# Build release binaries
 swift build -c release
 
-# Find your signing identity
-security find-identity -v -p codesigning
+# Create signing certificate (if you don't have one)
+./Scripts/create-signing-cert.sh
 
-# Sign with your certificate (replace YOUR_IDENTITY)
-codesign --force --deep --sign "YOUR_IDENTITY" .build/release/PickleCider
-codesign --force --sign "YOUR_IDENTITY" .build/release/cider
-codesign --force --sign "YOUR_IDENTITY" .build/release/pickle
-
-# Create app bundle
-./Scripts/build-app-bundle.sh
+# Sign binaries
+CERT="Pickle Cider Development"  # or your certificate name
+codesign --force --sign "$CERT" .build/release/cider
+codesign --force --sign "$CERT" .build/release/pickle
+codesign --force --sign "$CERT" .build/release/PickleCider
 
 # Install
-cp -r .build/release/PickleCider.app /Applications/
 sudo cp .build/release/cider .build/release/pickle /usr/local/bin/
-```
-
-### Option 3: Quick Build Script
-
-```bash
-git clone https://github.com/damienheiser/pickle-cider
-cd pickle-cider
-./Scripts/install.sh
 ```
 
 ---
