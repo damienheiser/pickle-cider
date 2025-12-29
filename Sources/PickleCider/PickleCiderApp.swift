@@ -393,19 +393,20 @@ class AppState: ObservableObject {
                         }
                     }
 
-                    // Get note content
-                    var plaintext: String
-                    if let text = note.plaintext, !text.isEmpty {
-                        plaintext = text
-                    } else if let data = note.rawData {
+                    // Get note content with formatting
+                    var noteContent: String
+                    if let data = note.rawData {
                         do {
                             let parser = ProtobufParser()
                             let content = try parser.parseNoteData(data)
-                            plaintext = content.plaintext
+                            // Use markdown for formatted output (includes bold, italic, headings)
+                            noteContent = content.markdown.isEmpty ? content.plaintext : content.markdown
                         } catch {
                             skippedCount += 1
                             continue
                         }
+                    } else if let text = note.plaintext, !text.isEmpty {
+                        noteContent = text
                     } else {
                         skippedCount += 1
                         continue
@@ -415,7 +416,7 @@ class AppState: ObservableObject {
                     // The object replacement character marks where attachments go
                     var index = 0
                     var processedText = ""
-                    for char in plaintext {
+                    for char in noteContent {
                         if char == "\u{FFFC}" && index < attachments.count {
                             let attachment = attachments[index]
                             if let md = attachmentMarkdown[attachment.uuid] {
