@@ -1,50 +1,158 @@
 # Pickle Cider
 
-Three powerful native macOS tools for working with Apple Notes: a beautiful SwiftUI GUI app and two CLI tools.
+Native macOS tools for working with Apple Notes - sync, backup, and version history.
 
-## Cider - "Press your notes into something useful"
+**Build from source required** - macOS Full Disk Access requires apps to be signed with a developer certificate. Building locally with Xcode automatically signs the app with your personal development certificate.
 
+## What's Included
+
+### 🫙 Pickle Cider - GUI App
+A beautiful SwiftUI app combining sync and version history.
+- Dashboard with stats at a glance
+- Browse all tracked notes
+- Drag & drop import/export
+- Control the Pickle daemon
+- Full Disk Access onboarding
+
+### 🍺 Cider - CLI Sync Tool
 Bidirectional sync between Apple Notes and markdown files.
+```bash
+cider pull ~/notes --recursive    # Export notes to markdown
+cider push ~/notes/doc.md         # Upload to Apple Notes
+cider sync ~/notes                # Bidirectional sync
+```
 
-### Features
+### 🥒 Pickle - CLI Version History
+Automatic version history with background daemon.
+```bash
+pickle install                    # Install background daemon
+pickle history "My Note"          # View version history
+pickle diff 1 2                   # Compare versions
+pickle restore 5                  # Restore to version
+```
 
-- **Pull**: Export all your Apple Notes to markdown files
-- **Push**: Upload markdown files to Apple Notes
-- **Sync**: Bidirectional sync with conflict detection
-- **Recursive**: Process entire directory trees with folder structure
+---
 
-### Installation
+## Installation (Build from Source)
+
+### Requirements
+- macOS 13.0 (Ventura) or later
+- Xcode 15+ (for building)
+- Full Disk Access permission
+
+### Option 1: Build with Xcode (Recommended)
+
+This method automatically signs the app with your personal development certificate.
 
 ```bash
-# Build from source
+# Clone the repository
+git clone https://github.com/damienheiser/pickle-cider
+cd pickle-cider
+
+# Generate Xcode project
+swift package generate-xcodeproj
+
+# Open in Xcode
+open PickleCider.xcodeproj
+```
+
+In Xcode:
+1. Select **PickleCider** scheme
+2. Set signing team to your Personal Team
+3. Build and Run (⌘R)
+4. Find the app in Products folder, drag to Applications
+
+### Option 2: Build with Swift + Manual Signing
+
+```bash
+# Clone and build
 git clone https://github.com/damienheiser/pickle-cider
 cd pickle-cider
 swift build -c release
 
+# Find your signing identity
+security find-identity -v -p codesigning
+
+# Sign with your certificate (replace YOUR_IDENTITY)
+codesign --force --deep --sign "YOUR_IDENTITY" .build/release/PickleCider
+codesign --force --sign "YOUR_IDENTITY" .build/release/cider
+codesign --force --sign "YOUR_IDENTITY" .build/release/pickle
+
+# Create app bundle
+./Scripts/build-app-bundle.sh
+
 # Install
-cp .build/release/cider /usr/local/bin/
+cp -r .build/release/PickleCider.app /Applications/
+sudo cp .build/release/cider .build/release/pickle /usr/local/bin/
 ```
 
-### Usage
+### Option 3: Quick Build Script
 
 ```bash
-# Initialize sync state
+git clone https://github.com/damienheiser/pickle-cider
+cd pickle-cider
+./Scripts/install.sh
+```
+
+---
+
+## Granting Full Disk Access
+
+After installation, you must grant Full Disk Access:
+
+1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
+2. Click the **+** button
+3. Add **Pickle Cider.app** (from Applications)
+4. Also add **Terminal.app** if using CLI tools
+5. **Quit and reopen** the app (required for changes to take effect)
+
+---
+
+## Usage
+
+### GUI App (Pickle Cider)
+
+Launch from Applications. The app will guide you through granting permissions on first launch.
+
+### CLI Tools
+
+```bash
+# Initialize Cider sync
 cider init
 
-# Export all notes to a directory
+# Export all notes to markdown
 cider pull ~/Documents/notes --recursive
 
-# Upload a file to Apple Notes
+# Upload files to Apple Notes
 cider push ~/Documents/notes/my-note.md
 
 # Bidirectional sync
 cider sync ~/Documents/notes --folder "My Synced Notes"
 
+# Install Pickle daemon for automatic versioning
+pickle install --interval 30
+
 # Check status
-cider status --detailed
+pickle status
+
+# View version history
+pickle history "My Important Note"
+
+# Compare versions
+pickle diff 1 2
+
+# Restore to previous version
+pickle restore 5
+
+# Export versions
+pickle export "My Note" ~/exports --format md
 ```
 
-### Commands
+---
+
+## Commands Reference
+
+### Cider Commands
 
 | Command | Description |
 |---------|-------------|
@@ -54,77 +162,18 @@ cider status --detailed
 | `cider sync <dir>` | Bidirectional sync |
 | `cider status` | Show sync status |
 
-### Options
+### Cider Options
 
 ```
---folder <name>    Target Apple Notes folder (default: "Cider Sync")
---format <md|txt|html>  Output format (default: md)
---recursive        Process subdirectories
---dry-run          Preview without making changes
---force            Overwrite conflicts
---verbose          Verbose output
+--folder <name>       Target Apple Notes folder (default: "Cider Sync")
+--format <md|txt>     Output format (default: md)
+--recursive           Process subdirectories
+--dry-run             Preview without making changes
+--force               Overwrite conflicts
+--verbose             Verbose output
 ```
 
----
-
-## Pickle - "Keep your notes in a pickle (the good kind)"
-
-Automatic version history for Apple Notes with a launchd daemon.
-
-### Features
-
-- **Automatic versioning**: Every change is captured automatically
-- **Background daemon**: Runs silently via launchd
-- **Version history**: Browse all versions of any note
-- **Diff**: Compare any two versions
-- **Restore**: Revert notes to previous versions
-- **Export**: Export versions to files or back to Apple Notes
-
-### Installation
-
-```bash
-# Build from source
-swift build -c release
-
-# Install
-cp .build/release/pickle /usr/local/bin/
-
-# Install the daemon
-pickle install
-```
-
-### Usage
-
-```bash
-# Install the background daemon
-pickle install --interval 30
-
-# Check daemon status
-pickle status
-
-# View version history for a note
-pickle history "My Important Note"
-
-# Compare two versions
-pickle diff 1 2
-
-# Restore to a previous version
-pickle restore 5
-
-# Export all versions of a note
-pickle export "My Note" ~/exports --format md
-
-# Export versions to Apple Notes folders
-pickle export-to-notes "My Note" --folder "Version History"
-
-# Stop the daemon
-pickle stop
-
-# Uninstall
-pickle uninstall
-```
-
-### Commands
+### Pickle Commands
 
 | Command | Description |
 |---------|-------------|
@@ -137,9 +186,8 @@ pickle uninstall
 | `pickle diff <v1> <v2>` | Compare versions |
 | `pickle restore <id>` | Restore to version |
 | `pickle export <note> <dir>` | Export versions to files |
-| `pickle export-to-notes` | Export to Apple Notes folders |
 
-### Options
+### Pickle Options
 
 ```
 --interval <seconds>  Check interval for daemon (default: 30)
@@ -151,84 +199,62 @@ pickle uninstall
 
 ---
 
-## Requirements
-
-- **macOS 12.0** (Monterey) or later
-- **Full Disk Access** permission for your terminal app
-- **Automation** permission for Notes.app
-
-### Granting Permissions
-
-1. Open **System Preferences > Security & Privacy > Privacy**
-2. Select **Full Disk Access**
-3. Add your terminal app (Terminal.app, iTerm, etc.)
-4. On first run, allow automation access to Notes.app when prompted
-
----
-
-## Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/damienheiser/pickle-cider
-cd pickle-cider
-
-# Build debug
-swift build
-
-# Build release
-swift build -c release
-
-# Run tests
-swift test
-
-# Build universal binary (Intel + Apple Silicon)
-./Scripts/build-release.sh
-```
-
----
-
 ## Data Storage
 
-### Cider
-- State database: `~/.cider/state.db`
-
-### Pickle
-- Version database: `~/.pickle/versions.db`
-- Version files: `~/.pickle/versions/YYYY/MM/DD/*.json.gz`
-- Logs: `~/.pickle/logs/`
+| Tool | Location | Purpose |
+|------|----------|---------|
+| Cider | `~/.cider/state.db` | Sync state tracking |
+| Pickle | `~/.pickle/versions.db` | Version metadata |
+| Pickle | `~/.pickle/versions/` | Version content (gzipped JSON) |
+| Pickle | `~/.pickle/logs/` | Daemon logs |
 
 ---
 
 ## Technical Details
 
-### Apple Notes Access
-
-- **Reading**: Direct SQLite access to `~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite`
-- **Writing**: AppleScript via NSAppleScript (required to preserve iCloud sync)
-- **Content format**: Notes are stored as gzip-compressed protobuf
+### How It Works
+- **Reading Notes**: Direct SQLite access to Apple Notes database
+- **Writing Notes**: AppleScript via NSAppleScript (preserves iCloud sync)
+- **Content Format**: Notes are stored as gzip-compressed protobuf
+- **Change Detection**: Polling-based (SQLite WAL makes file watching unreliable)
 
 ### Limitations
-
 - Password-protected notes cannot be accessed (skipped with warning)
 - Attachments are referenced but not synced
-- Apple Notes has no official API - these tools use reverse-engineered access
+- Requires Full Disk Access for database read access
+
+---
+
+## Troubleshooting
+
+### "SQLite error 23: authorization denied"
+Full Disk Access not granted or not applied yet.
+1. Check System Settings → Privacy & Security → Full Disk Access
+2. Ensure Pickle Cider and/or Terminal are listed and enabled
+3. **Quit and reopen** the app (macOS caches permissions)
+
+### App doesn't appear in Full Disk Access list
+The app must be properly signed. Build with Xcode or sign manually with your development certificate.
+
+### Daemon not starting
+```bash
+# Check if daemon is installed
+launchctl list | grep pickle
+
+# View daemon logs
+cat ~/.pickle/logs/stdout.log
+cat ~/.pickle/logs/stderr.log
+
+# Reinstall daemon
+pickle uninstall
+pickle install
+```
 
 ---
 
 ## License
 
 MIT License - see [LICENSE](LICENSE)
-
----
-
-## Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Submit a pull request
 
 ---
 
@@ -239,45 +265,6 @@ Built with:
 - [GRDB.swift](https://github.com/groue/GRDB.swift)
 - [Swift Protobuf](https://github.com/apple/swift-protobuf)
 - [SwiftSoup](https://github.com/scinfu/SwiftSoup)
-
----
-
-## Pickle Cider - The GUI App
-
-A beautiful SwiftUI app that combines both Cider and Pickle in an easy-to-use interface.
-
-### Features
-
-- **Dashboard**: See all your Apple Notes stats at a glance
-- **Tracked Notes**: Browse all notes being versioned
-- **Drag & Drop**: Import files by dropping them onto the window
-- **Export**: One-click export of all versions
-- **Daemon Control**: Start/stop the Pickle daemon from the app
-- **Cute Pickle Jar Icon**: With a spigot!
-
-### Installation
-
-```bash
-# Build
-swift build -c release
-
-# The app is at:
-.build/release/PickleCider
-
-# Or create an .app bundle manually
-```
-
-### Screenshot Description
-
-The app features:
-- A dark green gradient background (pickle-themed!)
-- A cute pickle jar icon with pickles inside and a spigot
-- Stats cards showing notes, versions, and synced files
-- A list of tracked notes with version counts
-- Import/Export buttons
-- Daemon status indicator
-
----
 
 Inspired by:
 - [apple_cloud_notes_parser](https://github.com/threeplanetssoftware/apple_cloud_notes_parser)

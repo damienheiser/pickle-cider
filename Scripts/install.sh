@@ -1,50 +1,62 @@
 #!/bin/bash
 set -e
 
-# Install script for Cider & Pickle
-# Builds and installs to /usr/local/bin
+# Pickle Cider - Quick Install Script
+# Builds and installs with your local development certificate
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
-echo "Installing Cider & Pickle"
-echo "========================="
+echo ""
+echo "  🫙 Pickle Cider Installer"
+echo "  ========================="
 echo ""
 
 cd "$PROJECT_DIR"
 
-# Build release
-echo "Building release..."
-swift build -c release
-
-# Check if we need sudo
-if [ -w "$INSTALL_DIR" ]; then
-    SUDO=""
-else
-    SUDO="sudo"
-    echo "Installing to $INSTALL_DIR (requires sudo)..."
+# Check for Xcode command line tools
+if ! xcode-select -p &>/dev/null; then
+    echo "Installing Xcode Command Line Tools..."
+    xcode-select --install
+    echo ""
+    echo "Please run this script again after installation completes."
+    exit 1
 fi
 
-# Install binaries
-echo "Installing cider..."
-$SUDO cp .build/release/cider "$INSTALL_DIR/"
-$SUDO chmod +x "$INSTALL_DIR/cider"
+# Build release
+echo "Building Pickle Cider..."
+swift build -c release
 
-echo "Installing pickle..."
-$SUDO cp .build/release/pickle "$INSTALL_DIR/"
-$SUDO chmod +x "$INSTALL_DIR/pickle"
+# Build app bundle with signing
+echo ""
+"$SCRIPT_DIR/build-app-bundle.sh"
+
+BUILD_DIR="$PROJECT_DIR/.build/release"
+
+# Install app
+echo ""
+echo "Installing to Applications..."
+cp -r "$BUILD_DIR/Pickle Cider.app" /Applications/
+
+# Install CLI tools
+echo "Installing CLI tools to /usr/local/bin..."
+sudo mkdir -p /usr/local/bin
+sudo cp "$BUILD_DIR/cider" /usr/local/bin/
+sudo cp "$BUILD_DIR/pickle" /usr/local/bin/
 
 echo ""
-echo "Installation complete!"
+echo "================================"
+echo "  Installation Complete! 🎉"
+echo "================================"
 echo ""
-echo "Installed to:"
-echo "  $INSTALL_DIR/cider"
-echo "  $INSTALL_DIR/pickle"
+echo "Next steps:"
 echo ""
-echo "Quick start:"
+echo "1. Open System Settings → Privacy & Security → Full Disk Access"
+echo "2. Click + and add 'Pickle Cider' from Applications"
+echo "3. Also add 'Terminal' if using CLI tools"
+echo "4. Launch Pickle Cider from Applications"
+echo ""
+echo "CLI tools installed:"
 echo "  cider --help"
 echo "  pickle --help"
 echo ""
-echo "To set up Pickle daemon:"
-echo "  pickle install"
