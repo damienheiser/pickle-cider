@@ -1,12 +1,25 @@
 import SwiftUI
 import CiderCore
 import AppKit
+import Carbon.HIToolbox
 
 @main
 struct PickleCiderApp: App {
     @StateObject private var appState = AppState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
+        // Menu Bar Extra - Always visible
+        MenuBarExtra {
+            MenuBarView()
+                .environmentObject(appState)
+        } label: {
+            Image(systemName: appState.inAppMonitoringActive ? "leaf.fill" : "leaf")
+                .symbolRenderingMode(.hierarchical)
+        }
+        .menuBarExtraStyle(.window)
+
+        // Main Window - Opens on demand
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
@@ -20,6 +33,208 @@ struct PickleCiderApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
+        }
+    }
+}
+
+// MARK: - App Delegate for Global Hotkey
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var hotKeyRef: EventHotKeyRef?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register global hotkey: ⌘⇧V for version picker
+        registerGlobalHotkey()
+
+        // Hide dock icon - we're a menu bar app now
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let hotKeyRef = hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+    }
+
+    private func registerGlobalHotkey() {
+        // ⌘⇧V = Command + Shift + V
+        let hotKeyID = EventHotKeyID(signature: OSType(0x5049434B), id: 1) // "PICK"
+        let modifiers: UInt32 = UInt32(cmdKey | shiftKey)
+        let keyCode: UInt32 = 0x09 // 'V' key
+
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+
+        InstallEventHandler(GetApplicationEventTarget(), { (_, event, _) -> OSStatus in
+            // Post notification when hotkey pressed
+            NotificationCenter.default.post(name: .showVersionPicker, object: nil)
+            return noErr
+        }, 1, &eventType, nil, nil)
+
+        RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+    }
+}
+
+extension Notification.Name {
+    static let showVersionPicker = Notification.Name("showVersionPicker")
+}
+
+// MARK: - Menu Bar View
+
+struct MenuBarView: View {
+    @EnvironmentObject var appState: AppState
+    @Environment(\.openWindow) var openWindow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Image(systemName: "leaf.fill")
+                    .foregroundColor(.green)
+                Text("Pickle Cider")
+                    .font(.headline)
+                Spacer()
+                if appState.inAppMonitoringActive {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
+                }
+            }
+            .padding(.bottom, 4)
+
+            Divider()
+
+            // Status
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: "doc.text")
+                    Text("\(appState.noteCount) notes")
+                    Spacer()
+                }
+
+                HStack {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text("\(appState.versionCount) versions saved")
+                    Spacer()
+                }
+
+                if let lastCheck = appState.lastMonitorCheck {
+                    HStack {
+                        Image(systemName: "checkmark.circle")
+                        Text("Last check: \(lastCheck, formatter: timeFormatter)")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+            }
+            .font(.system(size: 12))
+
+            Divider()
+
+            // Actions
+            Button(action: { openMainWindow() }) {
+                Label("Open Pickle Cider", systemImage: "macwindow")
+            }
+            .buttonStyle(.plain)
+
+            Button(action: { appState.refresh() }) {
+                Label("Refresh Now", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+
+            // Monitoring toggle
+            Toggle(isOn: Binding(
+                get: { appState.inAppMonitoringActive },
+                set: { newValue in
+                    if newValue {
+                        appState.startInAppMonitoring()
+                    } else {
+                        appState.stopInAppMonitoring()
+                    }
+                }
+            )) {
+                Label("Background Monitoring", systemImage: "eye")
+            }
+            .toggleStyle(.switch)
+
+            // Start at login toggle
+            Toggle(isOn: Binding(
+                get: { LoginItemHelper.shared.isEnabled },
+                set: { LoginItemHelper.shared.isEnabled = $0 }
+            )) {
+                Label("Start at Login", systemImage: "power")
+            }
+            .toggleStyle(.switch)
+
+            Divider()
+
+            // Hotkey hint
+            HStack {
+                Text("⌘⇧V")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.2))
+                    .cornerRadius(4)
+                Text("Version Picker")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            Button(action: { NSApplication.shared.terminate(nil) }) {
+                Label("Quit", systemImage: "power")
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.red)
+        }
+        .padding()
+        .frame(width: 260)
+    }
+
+    private func openMainWindow() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.title != "Item-0" && $0.canBecomeMain }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private var timeFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        return f
+    }
+}
+
+// MARK: - Login Item Helper
+
+import ServiceManagement
+
+class LoginItemHelper {
+    static let shared = LoginItemHelper()
+
+    var isEnabled: Bool {
+        get {
+            if #available(macOS 13.0, *) {
+                return SMAppService.mainApp.status == .enabled
+            }
+            return false
+        }
+        set {
+            if #available(macOS 13.0, *) {
+                do {
+                    if newValue {
+                        try SMAppService.mainApp.register()
+                    } else {
+                        try SMAppService.mainApp.unregister()
+                    }
+                } catch {
+                    print("Failed to \(newValue ? "enable" : "disable") login item: \(error)")
+                }
+            }
         }
     }
 }
