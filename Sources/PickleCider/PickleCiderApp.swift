@@ -21,7 +21,7 @@ struct PickleCiderApp: App {
         .menuBarExtraStyle(.window)
 
         // Main Window - Opens on demand
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView()
                 .environmentObject(appState)
         }
@@ -236,9 +236,7 @@ struct MenuBarView: View {
     private func openMainWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        if let window = NSApp.windows.first(where: { $0.title != "Item-0" && $0.canBecomeMain }) {
-            window.makeKeyAndOrderFront(nil)
-        }
+        openWindow(id: "main")
     }
 
     private var timeFormatter: DateFormatter {
