@@ -7,6 +7,7 @@ import Carbon.HIToolbox
 struct PickleCiderApp: App {
     @StateObject private var appState = AppState()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         // Menu Bar Extra - Always visible
@@ -30,6 +31,15 @@ struct PickleCiderApp: App {
             CommandGroup(replacing: .newItem) {}
         }
 
+        // Version Picker Window - Opens via ⌘⇧V hotkey
+        WindowGroup(id: "version-picker") {
+            VersionPickerView()
+                .environmentObject(appState)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Settings {
             SettingsView()
                 .environmentObject(appState)
@@ -41,6 +51,7 @@ struct PickleCiderApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKeyRef: EventHotKeyRef?
+    private var notificationObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register global hotkey: ⌘⇧V for version picker
@@ -48,11 +59,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Hide dock icon - we're a menu bar app now
         NSApp.setActivationPolicy(.accessory)
+
+        // Observe version picker notification
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .showVersionPicker,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.openVersionPicker()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let hotKeyRef = hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
+        }
+        if let observer = notificationObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -72,10 +95,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
     }
+
+    private func openVersionPicker() {
+        // Bring app to front and open version picker window
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Find or create the version picker window
+        if let existingWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == "version-picker" }) {
+            existingWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Open via environment - need to use a workaround since we can't access @Environment here
+            // Post a notification that the SwiftUI view can observe
+            NotificationCenter.default.post(name: .openVersionPickerWindow, object: nil)
+        }
+    }
 }
 
 extension Notification.Name {
     static let showVersionPicker = Notification.Name("showVersionPicker")
+    static let openVersionPickerWindow = Notification.Name("openVersionPickerWindow")
 }
 
 // MARK: - Menu Bar View
