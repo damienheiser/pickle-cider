@@ -694,6 +694,13 @@ extension String {
             .replacingOccurrences(of: "\\", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    var escapedForHTML: String {
+        self.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
 }
 
 import UniformTypeIdentifiers
@@ -708,6 +715,10 @@ struct VersionPickerView: View {
     @State private var versions: [VersionInfo] = []
     @State private var selectedVersion: VersionInfo?
     @State private var isLoadingVersions = false
+    @State private var showingRestoreConfirmation = false
+    @State private var restoreError: String?
+    @State private var showingRestoreError = false
+    @State private var restoreSuccess = false
 
     var filteredNotes: [TrackedNote] {
         if searchText.isEmpty {
@@ -858,14 +869,34 @@ struct VersionPickerView: View {
                                     .buttonStyle(VersionPickerButtonStyle(color: Color(hex: "4A90D9")))
 
                                     Button {
-                                        restoreVersion(version)
+                                        showingRestoreConfirmation = true
                                     } label: {
                                         Label("Restore", systemImage: "arrow.uturn.backward")
                                     }
                                     .buttonStyle(VersionPickerButtonStyle(color: Color(hex: "9ACD32")))
+                                    .disabled(version.versionNumber == versions.first?.versionNumber)
                                 }
                                 .padding()
                                 .background(Color.black.opacity(0.2))
+                            }
+
+                            // Success indicator
+                            if restoreSuccess {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text("Restored successfully!")
+                                        .foregroundColor(.white)
+                                }
+                                .padding()
+                                .background(Color.green.opacity(0.2))
+                                .cornerRadius(8)
+                                .transition(.opacity)
+                                .onAppear {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        withAnimation { restoreSuccess = false }
+                                    }
+                                }
                             }
                         } else {
                             Spacer()
@@ -886,6 +917,25 @@ struct VersionPickerView: View {
         .frame(width: 700, height: 500)
         .onAppear {
             appState.refresh()
+        }
+        .confirmationDialog(
+            "Restore to Version \(selectedVersion?.versionNumber ?? 0)?",
+            isPresented: $showingRestoreConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Restore", role: .destructive) {
+                if let version = selectedVersion {
+                    restoreVersion(version)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will overwrite the current note content with version \(selectedVersion?.versionNumber ?? 0). The current content is already saved as a version, so you won't lose anything.")
+        }
+        .alert("Restore Failed", isPresented: $showingRestoreError) {
+            Button("OK") {}
+        } message: {
+            Text(restoreError ?? "Unknown error")
         }
     }
 
@@ -944,8 +994,65 @@ struct VersionPickerView: View {
     }
 
     private func restoreVersion(_ version: VersionInfo) {
-        // TODO: Implement restore functionality
-        print("Restore version \(version.versionNumber)")
+        guard let note = selectedNote else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                // Load the version content
+                let versionDB = try VersionDatabase()
+                let content = try versionDB.loadVersionContent(storagePath: version.storagePath)
+
+                // Get the note record to find the folder
+                guard let noteRecord = try versionDB.getNote(uuid: note.id) else {
+                    throw RestoreError.noteNotFound
+                }
+
+                // Create NotesWriter and restore the content
+                let writer = NotesWriter()
+
+                // Convert plaintext to basic HTML for Apple Notes
+                // Apple Notes expects HTML in the body field
+                let htmlContent = content.content.plaintext
+                    .components(separatedBy: "\n")
+                    .map { "<div>\($0.isEmpty ? "<br>" : $0.escapedForHTML)</div>" }
+                    .joined()
+
+                // Update the note via AppleScript
+                // We use the title and folder to find the note since we have those
+                let folder = noteRecord.folderPath ?? "Notes"
+                let title = noteRecord.title ?? "Untitled"
+
+                try writer.updateNote(title: title, body: htmlContent, folder: folder)
+
+                DispatchQueue.main.async {
+                    withAnimation {
+                        self.restoreSuccess = true
+                    }
+                    // Refresh the version list after restore
+                    // The monitor will pick up the change and create a new version
+                    self.loadVersions(for: note)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.restoreError = error.localizedDescription
+                    self.showingRestoreError = true
+                }
+            }
+        }
+    }
+}
+
+enum RestoreError: Error, LocalizedError {
+    case noteNotFound
+    case contentLoadFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .noteNotFound:
+            return "Could not find the note in the database"
+        case .contentLoadFailed:
+            return "Could not load version content"
+        }
     }
 }
 
