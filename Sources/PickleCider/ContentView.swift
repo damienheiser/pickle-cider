@@ -112,8 +112,7 @@ struct ContentView: View {
     }
 
     private func importFiles(_ urls: [URL]) {
-        // Import logic would go here - push to Apple Notes
-        appState.refresh()
+        appState.importMarkdownFiles(urls)
     }
 }
 
@@ -694,6 +693,469 @@ extension String {
             .replacingOccurrences(of: "\\", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    var escapedForHTML: String {
+        self.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
 }
 
 import UniformTypeIdentifiers
+
+// MARK: - Version Picker View
+
+struct VersionPickerView: View {
+    @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var selectedNote: TrackedNote?
+    @State private var versions: [VersionInfo] = []
+    @State private var selectedVersion: VersionInfo?
+    @State private var isLoadingVersions = false
+    @State private var showingRestoreConfirmation = false
+    @State private var restoreError: String?
+    @State private var showingRestoreError = false
+    @State private var restoreSuccess = false
+
+    var filteredNotes: [TrackedNote] {
+        if searchText.isEmpty {
+            return appState.trackedNotes
+        }
+        return appState.trackedNotes.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            // Background
+            LinearGradient(
+                colors: [Color(hex: "1A3009"), Color(hex: "0D1804")],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.title2)
+                        .foregroundColor(Color(hex: "9ACD32"))
+                    Text("Version Picker")
+                        .font(.title2.bold())
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text("⌘⇧V")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(4)
+                        .foregroundColor(.white.opacity(0.5))
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding()
+
+                Divider().background(Color.white.opacity(0.2))
+
+                HStack(spacing: 0) {
+                    // Notes list (left side)
+                    VStack(spacing: 0) {
+                        // Search
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.white.opacity(0.5))
+                            TextField("Search notes...", text: $searchText)
+                                .textFieldStyle(.plain)
+                                .foregroundColor(.white)
+                        }
+                        .padding(10)
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(8)
+                        .padding()
+
+                        // Notes list
+                        ScrollView {
+                            LazyVStack(spacing: 4) {
+                                ForEach(filteredNotes) { note in
+                                    VersionPickerNoteRow(
+                                        note: note,
+                                        isSelected: selectedNote?.id == note.id
+                                    )
+                                    .onTapGesture {
+                                        selectedNote = note
+                                        loadVersions(for: note)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                    .frame(width: 280)
+                    .background(Color.black.opacity(0.2))
+
+                    Divider().background(Color.white.opacity(0.2))
+
+                    // Versions list (right side)
+                    VStack(spacing: 0) {
+                        if let note = selectedNote {
+                            // Note header
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(note.title)
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                    Text("\(versions.count) versions")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                                Spacer()
+                            }
+                            .padding()
+                            .background(Color.white.opacity(0.05))
+
+                            if isLoadingVersions {
+                                Spacer()
+                                ProgressView()
+                                    .tint(.white)
+                                Spacer()
+                            } else if versions.isEmpty {
+                                Spacer()
+                                VStack(spacing: 12) {
+                                    Image(systemName: "clock.badge.questionmark")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.white.opacity(0.3))
+                                    Text("No versions found")
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                                Spacer()
+                            } else {
+                                ScrollView {
+                                    LazyVStack(spacing: 8) {
+                                        ForEach(versions) { version in
+                                            VersionRow(
+                                                version: version,
+                                                isSelected: selectedVersion?.id == version.id
+                                            )
+                                            .onTapGesture {
+                                                selectedVersion = version
+                                            }
+                                        }
+                                    }
+                                    .padding()
+                                }
+                            }
+
+                            // Action buttons
+                            if let version = selectedVersion {
+                                HStack(spacing: 12) {
+                                    Button {
+                                        viewVersion(version)
+                                    } label: {
+                                        Label("View", systemImage: "eye")
+                                    }
+                                    .buttonStyle(VersionPickerButtonStyle(color: Color(hex: "4A90D9")))
+
+                                    Button {
+                                        showingRestoreConfirmation = true
+                                    } label: {
+                                        Label("Restore", systemImage: "arrow.uturn.backward")
+                                    }
+                                    .buttonStyle(VersionPickerButtonStyle(color: Color(hex: "9ACD32")))
+                                    .disabled(version.versionNumber == versions.first?.versionNumber)
+                                }
+                                .padding()
+                                .background(Color.black.opacity(0.2))
+                            }
+
+                            // Success indicator
+                            if restoreSuccess {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text("Restored successfully!")
+                                        .foregroundColor(.white)
+                                }
+                                .padding()
+                                .background(Color.green.opacity(0.2))
+                                .cornerRadius(8)
+                                .transition(.opacity)
+                                .onAppear {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        withAnimation { restoreSuccess = false }
+                                    }
+                                }
+                            }
+                        } else {
+                            Spacer()
+                            VStack(spacing: 12) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.white.opacity(0.2))
+                                Text("Select a note to view versions")
+                                    .foregroundColor(.white.opacity(0.4))
+                            }
+                            Spacer()
+                        }
+                    }
+                    .frame(minWidth: 320)
+                }
+            }
+        }
+        .frame(width: 700, height: 500)
+        .onAppear {
+            appState.refresh()
+        }
+        .confirmationDialog(
+            "Restore Version \(selectedVersion?.versionNumber ?? 0)?",
+            isPresented: $showingRestoreConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Create Restored Note") {
+                if let version = selectedVersion {
+                    restoreVersion(version)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will create a NEW note with the content from version \(selectedVersion?.versionNumber ?? 0). The original note remains unchanged so you can compare them side-by-side.")
+        }
+        .alert("Restore Failed", isPresented: $showingRestoreError) {
+            Button("OK") {}
+        } message: {
+            Text(restoreError ?? "Unknown error")
+        }
+    }
+
+    private func loadVersions(for note: TrackedNote) {
+        isLoadingVersions = true
+        selectedVersion = nil
+        versions = []
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let versionDB = try VersionDatabase()
+                if let noteRecord = try versionDB.getNote(uuid: note.id) {
+                    let versionRecords = try versionDB.getVersions(noteID: noteRecord.id!)
+                    let loadedVersions = versionRecords.map { record in
+                        VersionInfo(
+                            id: record.id!,
+                            versionNumber: record.versionNumber,
+                            capturedAt: Date(timeIntervalSince1970: TimeInterval(record.capturedAt ?? 0)),
+                            preview: record.plaintextPreview ?? "",
+                            wordCount: record.wordCount,
+                            storagePath: record.storagePath
+                        )
+                    }
+                    DispatchQueue.main.async {
+                        self.versions = loadedVersions
+                        self.isLoadingVersions = false
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.isLoadingVersions = false
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isLoadingVersions = false
+                }
+            }
+        }
+    }
+
+    private func viewVersion(_ version: VersionInfo) {
+        // Open in Quick Look or a preview sheet
+        do {
+            let versionDB = try VersionDatabase()
+            let content = try versionDB.loadVersionContent(storagePath: version.storagePath)
+
+            // Create a temporary file and open it
+            let tempDir = FileManager.default.temporaryDirectory
+            let filename = "\(selectedNote?.title.sanitizedForFilename ?? "note")-v\(version.versionNumber).txt"
+            let tempFile = tempDir.appendingPathComponent(filename)
+            try content.content.plaintext.write(to: tempFile, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.open(tempFile)
+        } catch {
+            print("Failed to view version: \(error)")
+        }
+    }
+
+    private func restoreVersion(_ version: VersionInfo) {
+        guard let note = selectedNote else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                // Load the version content
+                let versionDB = try VersionDatabase()
+                let content = try versionDB.loadVersionContent(storagePath: version.storagePath)
+
+                // Get the note record to find the folder
+                guard let noteRecord = try versionDB.getNote(uuid: note.id) else {
+                    throw RestoreError.noteNotFound
+                }
+
+                // Create NotesWriter
+                let writer = NotesWriter()
+
+                let folder = noteRecord.folderPath ?? "Notes"
+                let originalTitle = noteRecord.title ?? "Untitled"
+
+                // Create a NEW note with restored content instead of overwriting
+                // This allows direct comparison with the original
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+                let timestamp = dateFormatter.string(from: Date())
+                let restoredTitle = "\(originalTitle) (Restored v\(version.versionNumber) - \(timestamp))"
+
+                // Build HTML content with reference to original note
+                var htmlLines: [String] = []
+
+                // Add header with link to original note
+                htmlLines.append("<div><b>🔄 Restored from Version \(version.versionNumber)</b></div>")
+                htmlLines.append("<div><i>Original note: \(originalTitle.escapedForHTML)</i></div>")
+                htmlLines.append("<div><i>Restored on: \(timestamp)</i></div>")
+                htmlLines.append("<div><br></div>")
+                htmlLines.append("<div>─────────────────────────</div>")
+                htmlLines.append("<div><br></div>")
+
+                // Add the restored content
+                let contentLines = content.content.plaintext
+                    .components(separatedBy: "\n")
+                    .map { "<div>\($0.isEmpty ? "<br>" : $0.escapedForHTML)</div>" }
+                htmlLines.append(contentsOf: contentLines)
+
+                let htmlContent = htmlLines.joined()
+
+                // Create a new note instead of overwriting the original
+                try writer.createNote(title: restoredTitle, body: htmlContent, folder: folder)
+
+                DispatchQueue.main.async {
+                    withAnimation {
+                        self.restoreSuccess = true
+                    }
+                    // Refresh to show the user things worked
+                    // The monitor will pick up the new note
+                    self.appState.refresh()
+                    self.loadVersions(for: note)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.restoreError = error.localizedDescription
+                    self.showingRestoreError = true
+                }
+            }
+        }
+    }
+}
+
+enum RestoreError: Error, LocalizedError {
+    case noteNotFound
+    case contentLoadFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .noteNotFound:
+            return "Could not find the note in the database"
+        case .contentLoadFailed:
+            return "Could not load version content"
+        }
+    }
+}
+
+struct VersionPickerNoteRow: View {
+    let note: TrackedNote
+    let isSelected: Bool
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(note.title)
+                    .font(.system(.body, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text("\(note.versionCount) versions")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(Color(hex: "9ACD32"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isSelected ? Color.white.opacity(0.15) : Color.clear)
+        .cornerRadius(6)
+    }
+}
+
+struct VersionRow: View {
+    let version: VersionInfo
+    let isSelected: Bool
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Version \(version.versionNumber)")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text(version.capturedAt, style: .relative)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                Text(version.preview)
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(2)
+                Text("\(version.wordCount) words")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.4))
+            }
+        }
+        .padding()
+        .background(isSelected ? Color(hex: "9ACD32").opacity(0.2) : Color.white.opacity(0.05))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color(hex: "9ACD32") : Color.clear, lineWidth: 2)
+        )
+    }
+}
+
+struct VersionInfo: Identifiable {
+    let id: Int64
+    let versionNumber: Int
+    let capturedAt: Date
+    let preview: String
+    let wordCount: Int
+    let storagePath: String
+}
+
+struct VersionPickerButtonStyle: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.bold())
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(configuration.isPressed ? color.opacity(0.8) : color)
+            .cornerRadius(8)
+    }
+}

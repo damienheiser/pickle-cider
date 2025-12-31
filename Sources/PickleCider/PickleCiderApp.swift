@@ -7,6 +7,7 @@ import Carbon.HIToolbox
 struct PickleCiderApp: App {
     @StateObject private var appState = AppState()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         // Menu Bar Extra - Always visible
@@ -30,6 +31,15 @@ struct PickleCiderApp: App {
             CommandGroup(replacing: .newItem) {}
         }
 
+        // Version Picker Window - Opens via ⌘⇧V hotkey
+        WindowGroup(id: "version-picker") {
+            VersionPickerView()
+                .environmentObject(appState)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Settings {
             SettingsView()
                 .environmentObject(appState)
@@ -41,6 +51,7 @@ struct PickleCiderApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKeyRef: EventHotKeyRef?
+    private var notificationObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register global hotkey: ⌘⇧V for version picker
@@ -48,11 +59,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Hide dock icon - we're a menu bar app now
         NSApp.setActivationPolicy(.accessory)
+
+        // Observe version picker notification
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .showVersionPicker,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.openVersionPicker()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let hotKeyRef = hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
+        }
+        if let observer = notificationObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -72,10 +95,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         RegisterEventHotKey(keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
     }
+
+    private func openVersionPicker() {
+        // Bring app to front and open version picker window
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Find or create the version picker window
+        if let existingWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == "version-picker" }) {
+            existingWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Open via environment - need to use a workaround since we can't access @Environment here
+            // Post a notification that the SwiftUI view can observe
+            NotificationCenter.default.post(name: .openVersionPickerWindow, object: nil)
+        }
+    }
 }
 
 extension Notification.Name {
     static let showVersionPicker = Notification.Name("showVersionPicker")
+    static let openVersionPickerWindow = Notification.Name("openVersionPickerWindow")
 }
 
 // MARK: - Menu Bar View
@@ -310,6 +349,8 @@ class AppState: ObservableObject {
 
                 var savedCount = 0
 
+                print("Monitor: Starting check of \(notes.count) notes, known states: \(knownStates.count)")
+
                 for note in notes {
                     if note.isPasswordProtected { continue }
 
@@ -331,40 +372,46 @@ class AppState: ObservableObject {
                     }
 
                     if needsSave {
-                        let noteRecord = try versionDB.getOrCreateNote(
-                            uuid: note.uuid,
-                            title: note.displayTitle,
-                            folderPath: note.folderName
-                        )
+                        do {
+                            let noteRecord = try versionDB.getOrCreateNote(
+                                uuid: note.uuid,
+                                title: note.displayTitle,
+                                folderPath: note.folderName
+                            )
 
-                        if let noteID = noteRecord.id {
-                            // Check if content actually changed
-                            var shouldSave = true
-                            if let lastVersion = try? versionDB.getLatestVersion(noteID: noteID),
-                               let lastContent = try? versionDB.loadVersionContent(storagePath: lastVersion.storagePath) {
-                                shouldSave = lastContent.content.plaintext != plaintext
+                            if let noteID = noteRecord.id {
+                                // Check if content actually changed
+                                var shouldSave = true
+                                if let lastVersion = try? versionDB.getLatestVersion(noteID: noteID),
+                                   let lastContent = try? versionDB.loadVersionContent(storagePath: lastVersion.storagePath) {
+                                    shouldSave = lastContent.content.plaintext != plaintext
+                                }
+
+                                if shouldSave {
+                                    let content = VersionContent(
+                                        noteUUID: note.uuid,
+                                        appleNoteID: nil,
+                                        title: note.displayTitle,
+                                        folderPath: note.folderName,
+                                        capturedAt: Date(),
+                                        appleModificationDate: note.modificationDate,
+                                        plaintext: plaintext,
+                                        html: nil,
+                                        rawProtobuf: note.rawData
+                                    )
+                                    _ = try versionDB.saveVersion(noteID: noteID, content: content)
+                                    savedCount += 1
+                                }
                             }
 
-                            if shouldSave {
-                                let content = VersionContent(
-                                    noteUUID: note.uuid,
-                                    appleNoteID: nil,
-                                    title: note.displayTitle,
-                                    folderPath: note.folderName,
-                                    capturedAt: Date(),
-                                    appleModificationDate: note.modificationDate,
-                                    plaintext: plaintext,
-                                    html: nil,
-                                    rawProtobuf: note.rawData
-                                )
-                                _ = try versionDB.saveVersion(noteID: noteID, content: content)
-                                savedCount += 1
-                            }
+                            try versionDB.updateMonitorState(uuid: note.uuid, hash: currentHash, mtime: modTime)
+                        } catch {
+                            print("Monitor: Error processing note \(note.uuid): \(error)")
                         }
-
-                        try versionDB.updateMonitorState(uuid: note.uuid, hash: currentHash, mtime: modTime)
                     }
                 }
+
+                print("Monitor: Saved \(savedCount) versions")
 
                 DispatchQueue.main.async {
                     self.lastMonitorCheck = Date()
@@ -373,7 +420,8 @@ class AppState: ObservableObject {
                     }
                 }
             } catch {
-                // Silently fail - will retry next interval
+                // Log errors to help debugging
+                print("Monitor check error: \(error)")
             }
         }
     }
@@ -683,6 +731,97 @@ class AppState: ObservableObject {
                     self?.lastError = "Export failed: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    /// Import markdown files into Apple Notes
+    func importMarkdownFiles(_ urls: [URL]) {
+        isLoading = true
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let writer = NotesWriter()
+            var importedCount = 0
+            var failedCount = 0
+            var errors: [String] = []
+
+            for url in urls {
+                do {
+                    if url.hasDirectoryPath {
+                        // Import all markdown files from directory
+                        let contents = try FileManager.default.contentsOfDirectory(
+                            at: url,
+                            includingPropertiesForKeys: [.isRegularFileKey],
+                            options: [.skipsHiddenFiles]
+                        )
+
+                        for file in contents where file.pathExtension == "md" || file.pathExtension == "txt" {
+                            do {
+                                try self?.importSingleFile(file, writer: writer)
+                                importedCount += 1
+                            } catch {
+                                failedCount += 1
+                                errors.append("\(file.lastPathComponent): \(error.localizedDescription)")
+                            }
+                        }
+                    } else {
+                        // Import single file
+                        try self?.importSingleFile(url, writer: writer)
+                        importedCount += 1
+                    }
+                } catch {
+                    failedCount += 1
+                    errors.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                var message = "Imported \(importedCount) notes"
+                if failedCount > 0 {
+                    message += ", \(failedCount) failed"
+                }
+                self?.lastError = message
+                self?.refresh()
+            }
+        }
+    }
+
+    private func importSingleFile(_ url: URL, writer: NotesWriter) throws {
+        let content = try String(contentsOf: url, encoding: .utf8)
+
+        // Parse YAML frontmatter if present
+        var title = url.deletingPathExtension().lastPathComponent
+        var folder = "Notes"
+        var body = content
+
+        if content.hasPrefix("---\n") {
+            // Parse frontmatter
+            if let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex) {
+                let frontmatter = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+                body = String(content[endRange.upperBound...])
+
+                // Parse YAML-ish frontmatter
+                for line in frontmatter.components(separatedBy: "\n") {
+                    if line.hasPrefix("title:") {
+                        title = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    } else if line.hasPrefix("folder:") {
+                        folder = line.dropFirst(7).trimmingCharacters(in: .whitespaces)
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    }
+                }
+            }
+        }
+
+        // Convert markdown to HTML for Apple Notes
+        let converter = MarkdownConverter()
+        let html = converter.markdownToHTML(body)
+
+        // Create or update the note
+        if try writer.noteExists(title: title, folder: folder) {
+            try writer.updateNote(title: title, body: html, folder: folder)
+        } else {
+            try writer.createNote(title: title, body: html, folder: folder)
         }
     }
 
