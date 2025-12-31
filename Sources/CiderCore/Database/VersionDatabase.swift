@@ -407,6 +407,8 @@ public struct NoteRecord: Codable, FetchableRecord, PersistableRecord, Sendable,
         self.title = title
         self.folderPath = folderPath
         self.isDeleted = false
+        self.createdAt = Int64(Date().timeIntervalSince1970)
+        self.updatedAt = Int64(Date().timeIntervalSince1970)
     }
 }
 
@@ -448,7 +450,8 @@ public struct VersionRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         characterCount: Int,
         wordCount: Int,
         changeSummary: String?,
-        appleMtime: Int64?
+        appleMtime: Int64?,
+        capturedAt: Int64? = nil
     ) {
         self.noteID = noteID
         self.versionNumber = versionNumber
@@ -459,6 +462,7 @@ public struct VersionRecord: Codable, FetchableRecord, PersistableRecord, Sendab
         self.wordCount = wordCount
         self.changeSummary = changeSummary
         self.appleMtime = appleMtime
+        self.capturedAt = capturedAt ?? Int64(Date().timeIntervalSince1970)
     }
 }
 

@@ -310,6 +310,8 @@ class AppState: ObservableObject {
 
                 var savedCount = 0
 
+                print("Monitor: Starting check of \(notes.count) notes, known states: \(knownStates.count)")
+
                 for note in notes {
                     if note.isPasswordProtected { continue }
 
@@ -331,40 +333,46 @@ class AppState: ObservableObject {
                     }
 
                     if needsSave {
-                        let noteRecord = try versionDB.getOrCreateNote(
-                            uuid: note.uuid,
-                            title: note.displayTitle,
-                            folderPath: note.folderName
-                        )
+                        do {
+                            let noteRecord = try versionDB.getOrCreateNote(
+                                uuid: note.uuid,
+                                title: note.displayTitle,
+                                folderPath: note.folderName
+                            )
 
-                        if let noteID = noteRecord.id {
-                            // Check if content actually changed
-                            var shouldSave = true
-                            if let lastVersion = try? versionDB.getLatestVersion(noteID: noteID),
-                               let lastContent = try? versionDB.loadVersionContent(storagePath: lastVersion.storagePath) {
-                                shouldSave = lastContent.content.plaintext != plaintext
+                            if let noteID = noteRecord.id {
+                                // Check if content actually changed
+                                var shouldSave = true
+                                if let lastVersion = try? versionDB.getLatestVersion(noteID: noteID),
+                                   let lastContent = try? versionDB.loadVersionContent(storagePath: lastVersion.storagePath) {
+                                    shouldSave = lastContent.content.plaintext != plaintext
+                                }
+
+                                if shouldSave {
+                                    let content = VersionContent(
+                                        noteUUID: note.uuid,
+                                        appleNoteID: nil,
+                                        title: note.displayTitle,
+                                        folderPath: note.folderName,
+                                        capturedAt: Date(),
+                                        appleModificationDate: note.modificationDate,
+                                        plaintext: plaintext,
+                                        html: nil,
+                                        rawProtobuf: note.rawData
+                                    )
+                                    _ = try versionDB.saveVersion(noteID: noteID, content: content)
+                                    savedCount += 1
+                                }
                             }
 
-                            if shouldSave {
-                                let content = VersionContent(
-                                    noteUUID: note.uuid,
-                                    appleNoteID: nil,
-                                    title: note.displayTitle,
-                                    folderPath: note.folderName,
-                                    capturedAt: Date(),
-                                    appleModificationDate: note.modificationDate,
-                                    plaintext: plaintext,
-                                    html: nil,
-                                    rawProtobuf: note.rawData
-                                )
-                                _ = try versionDB.saveVersion(noteID: noteID, content: content)
-                                savedCount += 1
-                            }
+                            try versionDB.updateMonitorState(uuid: note.uuid, hash: currentHash, mtime: modTime)
+                        } catch {
+                            print("Monitor: Error processing note \(note.uuid): \(error)")
                         }
-
-                        try versionDB.updateMonitorState(uuid: note.uuid, hash: currentHash, mtime: modTime)
                     }
                 }
+
+                print("Monitor: Saved \(savedCount) versions")
 
                 DispatchQueue.main.async {
                     self.lastMonitorCheck = Date()
@@ -373,7 +381,8 @@ class AppState: ObservableObject {
                     }
                 }
             } catch {
-                // Silently fail - will retry next interval
+                // Log errors to help debugging
+                print("Monitor check error: \(error)")
             }
         }
     }
