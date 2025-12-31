@@ -734,6 +734,97 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Import markdown files into Apple Notes
+    func importMarkdownFiles(_ urls: [URL]) {
+        isLoading = true
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let writer = NotesWriter()
+            var importedCount = 0
+            var failedCount = 0
+            var errors: [String] = []
+
+            for url in urls {
+                do {
+                    if url.hasDirectoryPath {
+                        // Import all markdown files from directory
+                        let contents = try FileManager.default.contentsOfDirectory(
+                            at: url,
+                            includingPropertiesForKeys: [.isRegularFileKey],
+                            options: [.skipsHiddenFiles]
+                        )
+
+                        for file in contents where file.pathExtension == "md" || file.pathExtension == "txt" {
+                            do {
+                                try self?.importSingleFile(file, writer: writer)
+                                importedCount += 1
+                            } catch {
+                                failedCount += 1
+                                errors.append("\(file.lastPathComponent): \(error.localizedDescription)")
+                            }
+                        }
+                    } else {
+                        // Import single file
+                        try self?.importSingleFile(url, writer: writer)
+                        importedCount += 1
+                    }
+                } catch {
+                    failedCount += 1
+                    errors.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                var message = "Imported \(importedCount) notes"
+                if failedCount > 0 {
+                    message += ", \(failedCount) failed"
+                }
+                self?.lastError = message
+                self?.refresh()
+            }
+        }
+    }
+
+    private func importSingleFile(_ url: URL, writer: NotesWriter) throws {
+        let content = try String(contentsOf: url, encoding: .utf8)
+
+        // Parse YAML frontmatter if present
+        var title = url.deletingPathExtension().lastPathComponent
+        var folder = "Notes"
+        var body = content
+
+        if content.hasPrefix("---\n") {
+            // Parse frontmatter
+            if let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex) {
+                let frontmatter = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+                body = String(content[endRange.upperBound...])
+
+                // Parse YAML-ish frontmatter
+                for line in frontmatter.components(separatedBy: "\n") {
+                    if line.hasPrefix("title:") {
+                        title = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    } else if line.hasPrefix("folder:") {
+                        folder = line.dropFirst(7).trimmingCharacters(in: .whitespaces)
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    }
+                }
+            }
+        }
+
+        // Convert markdown to HTML for Apple Notes
+        let converter = MarkdownConverter()
+        let html = converter.markdownToHTML(body)
+
+        // Create or update the note
+        if try writer.noteExists(title: title, folder: folder) {
+            try writer.updateNote(title: title, body: html, folder: folder)
+        } else {
+            try writer.createNote(title: title, body: html, folder: folder)
+        }
+    }
+
     /// Format table summary text as a markdown table
     private func formatTableAsMarkdown(_ summary: String) -> String {
         // Table summaries come as "Header:\nValue\nHeader:\nValue" format
