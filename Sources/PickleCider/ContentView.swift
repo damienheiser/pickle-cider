@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var selectedNote: TrackedNote?
     @State private var showingExportPanel = false
     @State private var showingImportPanel = false
+    @State private var showingPDFExportPanel = false
     @State private var dragOver = false
 
     var body: some View {
@@ -44,7 +45,8 @@ struct ContentView: View {
                     // Action buttons
                     ActionButtonsView(
                         showingExportPanel: $showingExportPanel,
-                        showingImportPanel: $showingImportPanel
+                        showingImportPanel: $showingImportPanel,
+                        showingPDFExportPanel: $showingPDFExportPanel
                     )
                     .padding()
                 }
@@ -60,7 +62,7 @@ struct ContentView: View {
                 LoadingOverlayView()
             }
         }
-        .frame(width: 480, height: 640)
+        .frame(width: 480, height: 680)
         .onDrop(of: [.fileURL], isTargeted: $dragOver) { providers in
             handleDrop(providers: providers)
             return true
@@ -69,10 +71,20 @@ struct ContentView: View {
             isPresented: $showingExportPanel,
             document: ExportDocument(),
             contentType: .folder,
-            defaultFilename: "PickleCider Export"
+            defaultFilename: "Notes Export - Markdown"
         ) { result in
             if case .success(let url) = result {
                 exportAllNotes(to: url)
+            }
+        }
+        .fileExporter(
+            isPresented: $showingPDFExportPanel,
+            document: ExportDocument(),
+            contentType: .folder,
+            defaultFilename: "Notes Export - PDF"
+        ) { result in
+            if case .success(let url) = result {
+                appState.exportAllNotesToPDF(to: url)
             }
         }
         .fileImporter(
@@ -84,7 +96,7 @@ struct ContentView: View {
                 importFiles(urls)
             }
         }
-        .alert("Error", isPresented: .constant(appState.lastError != nil)) {
+        .alert("Status", isPresented: .constant(appState.lastError != nil)) {
             Button("OK") {
                 appState.lastError = nil
             }
@@ -112,8 +124,7 @@ struct ContentView: View {
     }
 
     private func importFiles(_ urls: [URL]) {
-        // Import logic would go here - push to Apple Notes
-        appState.refresh()
+        appState.importMarkdownFiles(urls)
     }
 }
 
@@ -381,23 +392,34 @@ struct ActionButtonsView: View {
     @EnvironmentObject var appState: AppState
     @Binding var showingExportPanel: Bool
     @Binding var showingImportPanel: Bool
+    @Binding var showingPDFExportPanel: Bool
 
     var body: some View {
-        HStack(spacing: 16) {
-            ActionButton(
-                title: "Import",
-                icon: "square.and.arrow.down",
-                color: Color(hex: "4A90D9")
-            ) {
-                showingImportPanel = true
+        VStack(spacing: 12) {
+            HStack(spacing: 16) {
+                ActionButton(
+                    title: "Import",
+                    icon: "square.and.arrow.down",
+                    color: Color(hex: "4A90D9")
+                ) {
+                    showingImportPanel = true
+                }
+
+                ActionButton(
+                    title: "Export MD",
+                    icon: "doc.text",
+                    color: Color(hex: "9ACD32")
+                ) {
+                    showingExportPanel = true
+                }
             }
 
             ActionButton(
-                title: "Export All",
-                icon: "square.and.arrow.up",
-                color: Color(hex: "9ACD32")
+                title: "Export Beautiful PDFs",
+                icon: "doc.richtext",
+                color: Color(hex: "E74C3C")
             ) {
-                showingExportPanel = true
+                showingPDFExportPanel = true
             }
         }
     }
@@ -919,18 +941,18 @@ struct VersionPickerView: View {
             appState.refresh()
         }
         .confirmationDialog(
-            "Restore to Version \(selectedVersion?.versionNumber ?? 0)?",
+            "Restore Version \(selectedVersion?.versionNumber ?? 0)?",
             isPresented: $showingRestoreConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Restore", role: .destructive) {
+            Button("Create Restored Note") {
                 if let version = selectedVersion {
                     restoreVersion(version)
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will overwrite the current note content with version \(selectedVersion?.versionNumber ?? 0). The current content is already saved as a version, so you won't lose anything.")
+            Text("This will create a NEW note with the content from version \(selectedVersion?.versionNumber ?? 0). The original note remains unchanged so you can compare them side-by-side.")
         }
         .alert("Restore Failed", isPresented: $showingRestoreError) {
             Button("OK") {}
@@ -1007,29 +1029,48 @@ struct VersionPickerView: View {
                     throw RestoreError.noteNotFound
                 }
 
-                // Create NotesWriter and restore the content
+                // Create NotesWriter
                 let writer = NotesWriter()
 
-                // Convert plaintext to basic HTML for Apple Notes
-                // Apple Notes expects HTML in the body field
-                let htmlContent = content.content.plaintext
+                let folder = noteRecord.folderPath ?? "Notes"
+                let originalTitle = noteRecord.title ?? "Untitled"
+
+                // Create a NEW note with restored content instead of overwriting
+                // This allows direct comparison with the original
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+                let timestamp = dateFormatter.string(from: Date())
+                let restoredTitle = "\(originalTitle) (Restored v\(version.versionNumber) - \(timestamp))"
+
+                // Build HTML content with reference to original note
+                var htmlLines: [String] = []
+
+                // Add header with link to original note
+                htmlLines.append("<div><b>🔄 Restored from Version \(version.versionNumber)</b></div>")
+                htmlLines.append("<div><i>Original note: \(originalTitle.escapedForHTML)</i></div>")
+                htmlLines.append("<div><i>Restored on: \(timestamp)</i></div>")
+                htmlLines.append("<div><br></div>")
+                htmlLines.append("<div>─────────────────────────</div>")
+                htmlLines.append("<div><br></div>")
+
+                // Add the restored content
+                let contentLines = content.content.plaintext
                     .components(separatedBy: "\n")
                     .map { "<div>\($0.isEmpty ? "<br>" : $0.escapedForHTML)</div>" }
-                    .joined()
+                htmlLines.append(contentsOf: contentLines)
 
-                // Update the note via AppleScript
-                // We use the title and folder to find the note since we have those
-                let folder = noteRecord.folderPath ?? "Notes"
-                let title = noteRecord.title ?? "Untitled"
+                let htmlContent = htmlLines.joined()
 
-                try writer.updateNote(title: title, body: htmlContent, folder: folder)
+                // Create a new note instead of overwriting the original
+                try writer.createNote(title: restoredTitle, body: htmlContent, folder: folder)
 
                 DispatchQueue.main.async {
                     withAnimation {
                         self.restoreSuccess = true
                     }
-                    // Refresh the version list after restore
-                    // The monitor will pick up the change and create a new version
+                    // Refresh to show the user things worked
+                    // The monitor will pick up the new note
+                    self.appState.refresh()
                     self.loadVersions(for: note)
                 }
             } catch {
